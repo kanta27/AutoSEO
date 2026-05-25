@@ -1,0 +1,99 @@
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    background-color: #faf7f2;
+    color: #141210;
+    font-family: "Geist", "Inter", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+@layer components {
+  .t-display {
+    font-family: "Instrument Serif", "Times New Roman", serif;
+    font-weight: 400;
+    font-size: clamp(56px, 9vw, 96px);
+    line-height: 0.92;
+    letter-spacing: -0.03em;
+  }
+  .t-h1 {
+    font-family: "Instrument Serif", "Times New Roman", serif;
+    font-weight: 400;
+    font-size: clamp(44px, 6.2vw, 72px);
+    line-height: 0.96;
+    letter-spacing: -0.025em;
+  }
+  .t-h2 {
+    font-family: "Instrument Serif", "Times New Roman", serif;
+    font-weight: 400;
+    font-size: clamp(28px, 3.4vw, 38px);
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+  }
+  .t-eyebrow {
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-weight: 500;
+    font-size: 11px;
+    line-height: 1;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #5c544a;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border px-[18px] py-[10px] text-[14px] font-medium shadow-elev-1 transition;
+    border-color: rgba(20, 18, 16, 0.18);
+    background: #fff;
+    color: #141210;
+  }
+  .btn:hover {
+    border-color: #141210;
+  }
+  .btn-primary {
+    background: #141210;
+    color: #fff;
+    border-color: #141210;
+  }
+  .btn-primary:hover {
+    background: #000;
+  }
+  .btn-accent {
+    background: #ff5b2e;
+    color: #fff;
+    border-color: #ff5b2e;
+  }
+  .btn-accent:hover {
+    background: #ed4a1e;
+    border-color: #ed4a1e;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium;
+    border-color: rgba(20, 18, 16, 0.18);
+    background: #fff;
+    color: #2a2622;
+  }
+  .chip-soon {
+    background: #f1ece2;
+    border-color: transparent;
+    color: #5c544a;
+  }
+  .chip-live {
+    background: #d4f26a;
+    border-color: transparent;
+    color: #2a4513;
+  }
+  .panel {
+    @apply rounded-lg border bg-card shadow-elev-2;
+    border-color: rgba(20, 18, 16, 0.1);
+  }
+  .panel-header {
+    @apply flex items-center justify-between border-b px-5 py-3 text-[13px] font-medium text-ink-3;
+    border-color: rgba(20, 18, 16, 0.1);
+  }
+}

@@ -97,6 +97,7 @@ def _fallback_plan(state: SEOState) -> dict:
 async def strategy_agent(state: SEOState) -> dict:
     research = state.get("research", {})
     audit = state.get("audit", {})
+    geo = state.get("geo_visibility", {}) or {}
     target = state["target"]
 
     human = (
@@ -106,6 +107,8 @@ async def strategy_agent(state: SEOState) -> dict:
         f"Technical audit: {audit.get('summary')}\n"
         f"On-page failed checks: {audit.get('onpage', {}).get('failed_checks')}\n"
         f"In local pack: {audit.get('brand_in_local_pack')}, GBP: {audit.get('gbp_listing')}\n"
+        f"GEO uncited queries (prioritize briefs that close these): {geo.get('uncited_queries', [])[:10]}\n"
+        f"GEO citable gaps (fold into the answer_first / outline fields): {geo.get('citable_gaps', [])[:5]}\n"
         "Produce the full strategy plan."
     )
 

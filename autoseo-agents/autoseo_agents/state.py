@@ -22,10 +22,11 @@ class SEOState(TypedDict, total=False):
     target: BrandTarget
 
     # Per-agent output slices (plain JSON, so they serialize and pass cleanly).
-    research: dict[str, Any]   # Agent 1
-    audit: dict[str, Any]      # Agent 2
-    strategy: dict[str, Any]   # Agent 3
-    monitor: dict[str, Any]    # Agent 4
+    research: dict[str, Any]         # Agent 1
+    audit: dict[str, Any]            # Agent 2
+    geo_visibility: dict[str, Any]   # Agent A10 — GEO / LLM-Visibility Auditor
+    strategy: dict[str, Any]         # Agent 3
+    monitor: dict[str, Any]          # Agent 4
 
     # Loop control.
     iteration: int

@@ -61,6 +61,7 @@ def _build_target(args: argparse.Namespace) -> BrandTarget:
 def _print_report(final: SEOState) -> None:
     research = final.get("research", {})
     audit = final.get("audit", {})
+    geo = final.get("geo_visibility", {}) or {}
     strategy = final.get("strategy", {})
     monitor = final.get("monitor", {})
 
@@ -77,6 +78,22 @@ def _print_report(final: SEOState) -> None:
     print(f"  Content briefs : {len(strategy.get('content_briefs', []))}")
     print(f"  Geo pages       : {len(strategy.get('geo_landing_pages', []))}")
     print(f"  Rank drops     : {len(monitor.get('drops', []))}")
+
+    print("\n  GEO / LLM-Visibility (A10):")
+    cited = geo.get("cited_queries") or []
+    uncited = geo.get("uncited_queries") or []
+    print(f"    Cited by AI    : {len(cited)} / {len(cited) + len(uncited)} tracked queries")
+    print(f"    Readiness score: {geo.get('geo_readiness_score', '-')}/100")
+    gaps = geo.get("citable_gaps") or []
+    if gaps:
+        print(f"    Top citable gaps:")
+        for g in gaps[:3]:
+            print(f"      - [{g.get('gap_type')}] {g.get('topic')}: {g.get('suggested_addition')}")
+    share = geo.get("competitor_citation_share") or {}
+    if share:
+        top3 = list(share.items())[:3]
+        print(f"    Competitor citation share: " + ", ".join(f"{d}={s}" for d, s in top3))
+
     print("\n  Flags:")
     for f in final.get("flags", []):
         print(f"    - {f}")
@@ -85,7 +102,7 @@ def _print_report(final: SEOState) -> None:
     out.mkdir(exist_ok=True)
     report_path = out / f"{final['target']['domain'].replace('.', '_')}.json"
     report_path.write_text(json.dumps(final, indent=2, default=str), encoding="utf-8")
-    print(f"\n  Full JSON report → {report_path}\n")
+    print(f"\n  Full JSON report -> {report_path}\n")
 
 
 async def _main() -> None:

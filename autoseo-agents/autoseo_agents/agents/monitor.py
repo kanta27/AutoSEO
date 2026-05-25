@@ -14,6 +14,7 @@ import logging
 from datetime import date
 from pathlib import Path
 
+from autoseo_agents.agents._tracked import tracked_keywords
 from autoseo_agents.config import settings
 from autoseo_agents.dataforseo import DataForSEOClient
 from autoseo_agents.dataforseo import serp
@@ -41,22 +42,6 @@ def _save(domain: str, data: dict) -> None:
     _store_path(domain).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def _tracked_keywords(state: SEOState, limit: int = 15) -> list[str]:
-    research = state.get("research", {})
-    kws: list[str] = []
-    for k in research.get("low_hanging", []):
-        kws.append(k["keyword"])
-    for g in research.get("gaps", []):
-        kws.append(g["keyword"])
-    # de-dupe, preserve order
-    seen, out = set(), []
-    for k in kws:
-        if k and k not in seen:
-            seen.add(k)
-            out.append(k)
-    return out[:limit]
-
-
 async def monitor_agent(state: SEOState) -> dict:
     target = state["target"]
     domain = target["domain"]
@@ -64,7 +49,7 @@ async def monitor_agent(state: SEOState) -> dict:
     history = _load(domain)
     today = date.today().isoformat()
 
-    keywords = _tracked_keywords(state)
+    keywords = tracked_keywords(state)
     movements: list[dict] = []
     flags: list[str] = []
 

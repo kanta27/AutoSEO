@@ -1,0 +1,9 @@
+{
+  "domain": "acme-plumbing.com",
+  "brand_name": "Acme Plumbing",
+  "location_name": "Austin,Texas,United States",
+  "location_code": 2840,
+  "language_code": "en",
+  "seed_keywords": ["emergency plumber", "water heater repair", "drain cleaning"],
+  "competitors": []
+}

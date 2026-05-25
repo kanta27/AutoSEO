@@ -1,0 +1,64 @@
+/* Admin dashboard — reuses tokens from /styles.css; adds layout for the agent UI. */
+.admin { padding: 24px 24px 80px; }
+
+.kpi-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin:20px 0 8px; }
+.kpi { padding:18px; background:var(--card); border:1px solid var(--line); border-radius:var(--r-md); box-shadow:var(--shadow-1); }
+.kpi .label { font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); }
+.kpi .val { font-family:var(--font-serif); font-size:32px; line-height:1; margin-top:6px; letter-spacing:-.02em; }
+.kpi .sub { font-size:12px; color:var(--ink-3); margin-top:6px; }
+
+.count-tag { font-family:var(--font-mono); font-size:12px; color:var(--ink-3); margin-left:8px; }
+
+.proposals, .agents, .targets { display:flex; flex-direction:column; gap:10px; }
+
+.proposal, .agent-row, .target-row {
+  display:grid; grid-template-columns:1fr auto; gap:14px; align-items:center;
+  padding:16px 18px; background:var(--card); border:1px solid var(--line); border-radius:var(--r-md);
+}
+.proposal h4, .agent-row h4, .target-row h4 { margin:0; font-size:15px; font-weight:600; }
+.proposal .meta, .agent-row .meta, .target-row .meta {
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-3); margin-top:4px;
+}
+.proposal p { margin:6px 0 0; color:var(--ink-2); font-size:14px; line-height:1.5; }
+.row-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+
+.btn-sm { font-family:var(--font-sans); font-weight:500; font-size:13px; padding:7px 14px;
+  border-radius:999px; border:1px solid var(--line-2); background:var(--card); color:var(--ink); cursor:pointer; }
+.btn-sm:hover { border-color:var(--ink); }
+.btn-sm.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+.btn-sm.primary:hover { background:#ed4a1e; }
+.btn-sm.dark { background:var(--ink); color:#fff; border-color:var(--ink); }
+.btn-sm.danger { color:var(--warn); }
+.btn-sm:disabled { opacity:.55; cursor:not-allowed; }
+
+.toggle { display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--ink-2); }
+.toggle input { appearance:none; width:34px; height:20px; background:var(--bg-2); border-radius:10px; position:relative; transition:background .15s; }
+.toggle input::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; background:#fff; border-radius:50%; transition:left .15s; box-shadow:var(--shadow-1); }
+.toggle input:checked { background:var(--ok); }
+.toggle input:checked::after { left:16px; }
+
+.empty { padding:20px; text-align:center; color:var(--ink-3); font-size:14px; border:1px dashed var(--line-2); border-radius:var(--r-md); }
+
+.status-pill { font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.08em;
+  padding:3px 8px; border-radius:999px; background:var(--bg-2); color:var(--ink-3); }
+.status-pill.pending { background:var(--accent-soft); color:var(--warn); }
+.status-pill.approved { background:#E1F3E7; color:var(--ok); }
+.status-pill.rejected { background:#FBE3DE; color:var(--crit); }
+.status-pill.success { background:#E1F3E7; color:var(--ok); }
+.status-pill.error { background:#FBE3DE; color:var(--crit); }
+.status-pill.running { background:var(--bg-2); color:var(--ink-2); }
+
+/* Detail drawer */
+.drawer { position:fixed; top:0; right:0; bottom:0; width:min(640px, 100%); background:var(--bg);
+  border-left:1px solid var(--line); box-shadow:var(--shadow-3); transform:translateX(100%);
+  transition:transform .2s ease; overflow-y:auto; z-index:30; }
+.drawer[aria-hidden="false"] { transform:translateX(0); }
+.drawer-inner { padding:24px; }
+.drawer-close { float:right; background:transparent; border:none; color:var(--ink-3); cursor:pointer; font-size:13px; }
+.log-entry { font-family:var(--font-mono); font-size:12px; padding:8px 10px; background:var(--card-2);
+  border:1px solid var(--line); border-radius:8px; margin-bottom:6px; white-space:pre-wrap; word-break:break-word; }
+.log-entry.tool_call { border-left:3px solid var(--accent); }
+.log-entry.tool_result { border-left:3px solid var(--ok); }
+.log-entry.reasoning { border-left:3px solid var(--ink-4); }
+.payload-pre { font-family:var(--font-mono); font-size:12px; background:var(--ink); color:#fff;
+  padding:14px; border-radius:10px; overflow-x:auto; white-space:pre-wrap; word-break:break-word; }

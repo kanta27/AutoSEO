@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AutoSEO — Agent dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="/admin/admin.css" />
+</head>
+<body>
+<header class="site">
+  <div class="container inner">
+    <a class="brand" href="/">
+      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+        <path d="M7 14 Q 12 6 17 14" stroke="#FF5B2E" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <circle cx="12" cy="14" r="1.8" fill="currentColor"/>
+      </svg>
+      <span class="brand-text">AutoSEO<span class="dot">.</span>live</span>
+    </a>
+    <span class="claude-tag">admin · agents</span>
+  </div>
+</header>
+
+<main class="container admin">
+  <section class="kpi-row" id="kpis"></section>
+
+  <h2 class="section-title">Pending proposals <span id="pendingCount" class="count-tag"></span></h2>
+  <div id="pending" class="proposals"></div>
+
+  <h2 class="section-title">Agents</h2>
+  <div id="agents" class="agents"></div>
+
+  <h2 class="section-title">Competitor targets</h2>
+  <div id="targets" class="targets"></div>
+</main>
+
+<div id="detailDrawer" class="drawer" aria-hidden="true">
+  <div class="drawer-inner">
+    <button class="drawer-close" id="drawerClose">close ✕</button>
+    <div id="drawerBody"></div>
+  </div>
+</div>
+
+<script src="/admin/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AutoSEO — Audit & fix any page's SEO + GEO</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Enter a URL and AutoSEO audits its SEO & GEO, scores it 0–100, and writes copy-paste-ready fixes for titles, meta, schema, and AI visibility." />
+<meta name="author" content="AutoSEO.live" />
+<link rel="canonical" href="https://autoseo.live/" />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="AutoSEO.live" />
+<meta property="og:url" content="https://autoseo.live/" />
+<meta property="og:title" content="AutoSEO — Audit & fix any page's SEO + GEO" />
+<meta property="og:description" content="Audit any URL, score it 0–100, and get copy-paste-ready fixes for SEO and AI-engine visibility." />
+<meta property="og:image" content="https://autoseo.live/og-image.png" />
+<meta property="article:published_time" content="2026-05-21" />
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="AutoSEO — Audit & fix any page's SEO + GEO" />
+<meta name="twitter:description" content="Audit any URL, score it 0–100, and get copy-paste-ready fixes for SEO and AI-engine visibility." />
+<meta name="twitter:image" content="https://autoseo.live/og-image.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/styles.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebApplication",
+      "name": "AutoSEO",
+      "url": "https://autoseo.live/",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "Audit any URL for SEO and GEO, score it 0–100, and generate copy-paste-ready fixes.",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What does AutoSEO check?",
+          "acceptedAnswer": { "@type": "Answer", "text": "AutoSEO runs five auditors over a page — on-page, technical, structured data, social, and GEO (AI visibility) — then scores it 0–100 and prioritizes the issues." }
+        },
+        {
+          "@type": "Question",
+          "name": "What is GEO and why does it matter?",
+          "acceptedAnswer": { "@type": "Answer", "text": "GEO (Generative Engine Optimization) is optimizing for AI answer engines like ChatGPT, Perplexity, and Google AI Overviews. About 44% of AI citations come from the first 30% of a page, so front-loading clear answers matters." }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need an API key?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. Without a key, AutoSEO returns deterministic rule-based fixes. Set ANTHROPIC_API_KEY to have Claude write the actual corrected titles, meta, schema, and summaries." }
+        },
+        {
+          "@type": "Question",
+          "name": "Can it fix the issues automatically?",
+          "acceptedAnswer": { "@type": "Answer", "text": "AutoSEO generates copy-paste-ready fixes you apply yourself. Autonomous PR-based fixes are on the roadmap per the AutoSEO/AutoGEO spec." }
+        }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<header class="site">
+  <div class="container inner">
+    <a class="brand" href="/">
+      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+        <path d="M7 14 Q 12 6 17 14" stroke="#FF5B2E" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <circle cx="12" cy="14" r="1.8" fill="currentColor"/>
+      </svg>
+      <span class="brand-text">AutoSEO<span class="dot">.</span>live</span>
+    </a>
+    <span id="claudeTag" class="claude-tag">checking…</span>
+  </div>
+</header>
+
+<main class="container">
+  <section class="hero">
+    <h1>Audit any page.<br/><span class="italic">Get the fixes.</span></h1>
+    <p><b>In short:</b> paste a URL and AutoSEO crawls it, runs an SEO + GEO audit swarm, scores it 0–100, and writes corrections you paste straight into your code — covering the <b>44.2%</b> of AI citations that come from the first 30% of a page.</p>
+    <form class="audit" id="auditForm">
+      <input class="input" id="urlInput" type="text" placeholder="yourdomain.com" autocomplete="url" required />
+      <button class="btn" id="runBtn" type="submit">Run audit →</button>
+    </form>
+    <div class="hint">Checks on-page, technical, structured data, social &amp; AI-visibility (GEO).</div>
+    <div class="error" id="errorBox"></div>
+  </section>
+
+  <section class="loading" id="loading">
+    <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    <p id="loadingMsg">Fetching page &amp; running auditors…</p>
+  </section>
+
+  <section class="results" id="results"></section>
+
+  <!-- Real, indexable content: also makes this page pass its own audit. -->
+  <section class="prose" aria-labelledby="how-title">
+    <h2 id="how-title">How does AutoSEO work?</h2>
+    <p>AutoSEO turns a single URL into a prioritized, fixable report in one pass. It mirrors the four-stage pipeline from the AutoSEO/AutoGEO spec — crawl, diagnose, prioritize, then write the fix — so every issue arrives with a ready-to-apply correction rather than a vague warning.</p>
+    <ol class="steps">
+      <li><b>Fetch.</b> The page is fetched server-side, following redirects and reading robots.txt — no browser CORS limits.</li>
+      <li><b>Audit.</b> Five auditors inspect on-page tags, technical health, structured data, social cards, and GEO signals.</li>
+      <li><b>Prioritize.</b> Findings are scored by severity and rolled up into a 0–100 grade with a per-category breakdown.</li>
+      <li><b>Solve.</b> Each fixable finding is turned into copy-paste-ready output — titles, meta, JSON-LD, TL;DRs, and Open Graph tags.</li>
+    </ol>
+
+    <h2 id="checks-title">What AutoSEO checks</h2>
+    <p>Each category maps to an auditor in the swarm. Here is what falls under each:</p>
+    <table class="checks">
+      <thead><tr><th>Category</th><th>Sample checks</th></tr></thead>
+      <tbody>
+        <tr><td>On-Page</td><td>Title &amp; meta length, single H1, heading order, alt text, content depth, canonical</td></tr>
+        <tr><td>Technical</td><td>HTTPS, status code, redirect chains, indexability, viewport, sitemap</td></tr>
+        <tr><td>Structured Data</td><td>JSON-LD presence, validity, type coverage, FAQ opportunities</td></tr>
+        <tr><td>Social</td><td>Open Graph completeness, Twitter/X card</td></tr>
+        <tr><td>GEO / AI Visibility</td><td>Answer-first summary, quotable stats, Q&amp;A headings, scannable structure, E-E-A-T signals</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="geo-title">What is GEO and why does it matter?</h2>
+    <p>GEO — Generative Engine Optimization — is optimizing for AI answer engines like ChatGPT, Perplexity, Claude, Gemini, and Google AI Overviews, where most sessions now end without a click to your site. Because roughly 44% of AI citations are lifted from the first 30% of a page, AutoSEO rewards pages that front-load a clear, self-contained answer, back claims with quotable statistics, and structure content as the questions people actually ask.</p>
+
+    <h2 id="key-title">Do I need an API key?</h2>
+    <p>No. AutoSEO is fully usable offline: without a key it returns deterministic, rule-based fixes. Set <code>ANTHROPIC_API_KEY</code> and Claude writes the actual corrected copy — better titles, descriptions, schema, and summaries — in a single structured call.</p>
+
+    <p class="byline">By the <span class="author">AutoSEO.live team</span> · <time datetime="2026-05-21">Updated May 21, 2026</time></p>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="container">AutoSEO.live — audit swarm → prioritizer → solver swarm. Built on the AutoSEO/AutoGEO spec.</div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

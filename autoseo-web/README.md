@@ -17,17 +17,17 @@ app calls:
 
 - Landing page (`/`) with the URL onboarding form + agent grid.
 - `POST /api/onboard` — audits the URL via the Node engine, asks the LLM
-  (Kimi 2.5 via MeshAPI) to infer name/description/brand-voice/product-info,
-  creates the company + documents, seeds the Actions Feed with the audit
-  summary, redirects to the dashboard.
+  (Gemini via its OpenAI-compatible endpoint) to infer name/description/
+  brand-voice/product-info, creates the company + documents, seeds the
+  Actions Feed with the audit summary, redirects to the dashboard.
 - Dashboard (`/dashboard`) — 4-panel layout pulling live from Supabase.
 - `POST /api/agents/seo/run` — re-runs the SEO/GEO audit, turns each finding
   into a `proposals` row, records an `agent_runs` row.
 - `POST /api/proposals/:id` — Approve/Reject (status flip only; real publish
   actions land in a later session).
-- `POST /api/chat` — streamed LLM reply (SSE; Kimi 2.5 via MeshAPI) grounded
-  on the live company context (company + pending proposals + latest audit +
-  documents).
+- `POST /api/chat` — streamed LLM reply (SSE; Gemini via OpenAI-compatible
+  endpoint) grounded on the live company context (company + pending proposals
+  + latest audit + documents).
 
 ## What's NOT wired this session (separate future prompts)
 
@@ -57,18 +57,17 @@ Copy `.env.example` to `.env.local` and fill in:
 
 ```env
 SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi…             # service-role, server-only
-MESHAPI_API_KEY=msh-…                              # get at https://app.meshapi.ai/
-MESHAPI_BASE_URL=https://api.meshapi.ai/v1         # default; override only if MeshAPI changes
-AUTOSEO_MODEL=moonshotai/Kimi-K2.5                 # exact slug from your MeshAPI dashboard
-NODE_ENGINE_URL=http://localhost:3000              # autoseo-app default
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi…                                       # service-role, server-only
+GEMINI_API_KEY=AIza…                                                         # get at https://aistudio.google.com/apikey
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/     # default; trailing slash required
+AUTOSEO_MODEL=gemini-2.5-flash                                               # see model note below
+NODE_ENGINE_URL=http://localhost:3000                                        # autoseo-app default
 ```
 
-> **About the model slug:** MeshAPI is an OpenAI-compatible gateway over 300+
-> models. The Kimi 2.5 slug above matches the Hugging Face / Together AI
-> convention, but if your MeshAPI dashboard shows a different identifier
-> (e.g. `kimi-k2.5`, `moonshot/kimi-k2-5`), put that string here. No code
-> change needed.
+> **About the model:** `gemini-2.5-flash` has the [Google AI Studio free
+> tier](https://aistudio.google.com/apikey) — the default. `gemini-3.5-flash`
+> is the newer paid GA (released 2026-05-19, $1.50 in / $9.00 out per 1M
+> tokens). Flip `AUTOSEO_MODEL` in `.env.local` to switch; no code change.
 
 ### 3. Run all three processes
 
@@ -109,7 +108,7 @@ autoseo-web (Next.js, this app)
   ├── app/api/proposals/[id]    decide() flips status
   ├── app/api/chat              streamed LLM reply over SSE
   ├── lib/supabase/server.ts    service-role client (server-only)
-  ├── lib/llm.ts                MeshAPI client (OpenAI SDK, server-only)
+  ├── lib/llm.ts                Gemini client (OpenAI SDK + compat URL, server-only)
   ├── lib/engines/node-audit.ts → POST autoseo-app/api/audit
   ├── lib/engines/python-swarm  STUB (future session)
   └── lib/proposals.ts          AuditReport → NewProposal[]
@@ -126,7 +125,7 @@ autoseo-web (Next.js, this app)
 autoseo-app (Node Express, the SEO/GEO engine)
    ├── POST /api/audit          ← what this app calls
    ├── runAudit() — auditors/* → prioritize → solver (its own optional
-   │                Claude key or rule-based; not yet migrated to MeshAPI)
+   │                Claude key or rule-based; separate from this app's LLM)
    └── (Has its own JSON-file admin system at /admin/ — left alone this session)
 ```
 
@@ -155,9 +154,9 @@ autoseo-app (Node Express, the SEO/GEO engine)
   shows the "not configured" message. No crash.
 - Node engine offline → onboarding still succeeds (with hostname-derived
   defaults), and a "Audit engine offline" card seeds the feed.
-- `MESHAPI_API_KEY` missing → onboarding uses fallback name/description; chat
-  returns a 500 with a clear "MESHAPI_API_KEY missing" error.
-- Wrong `AUTOSEO_MODEL` slug → MeshAPI returns a 4xx; the chat UI surfaces
+- `GEMINI_API_KEY` missing → onboarding uses fallback name/description; chat
+  returns a 500 with a clear "GEMINI_API_KEY missing" error.
+- Wrong `AUTOSEO_MODEL` slug → Gemini returns a 4xx; the chat UI surfaces
   the upstream error message. Update the env var, no restart needed for
   `npm run dev` (it picks up changes on next request).
 

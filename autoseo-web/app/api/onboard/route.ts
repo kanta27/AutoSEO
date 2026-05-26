@@ -2,8 +2,8 @@
 //
 // 1. Audit the URL via the Node engine (also seeds the dashboard's first
 //    Actions Feed card).
-// 2. Ask the LLM (Kimi 2.5 via MeshAPI) to infer company name/description +
-//    first-pass documents.
+// 2. Ask the LLM (Gemini via the OpenAI-compatible endpoint) to infer company
+//    name/description + first-pass documents.
 // 3. Insert companies + documents + one summary proposal.
 // 4. Return { companyId } so the client redirects to /dashboard?company=…
 //
@@ -175,8 +175,8 @@ function fallbackClassify(url: string, title?: string): ClassifyResult {
     description: title || `Company at ${host}`,
     category: "unknown",
     team_size: "unknown",
-    brand_voice_md: "_(Set MESHAPI_API_KEY to auto-generate brand voice notes from the homepage.)_",
-    product_info_md: "_(Set MESHAPI_API_KEY to auto-generate product info from the homepage.)_",
+    brand_voice_md: "_(Set GEMINI_API_KEY to auto-generate brand voice notes from the homepage.)_",
+    product_info_md: "_(Set GEMINI_API_KEY to auto-generate product info from the homepage.)_",
   };
 }
 
@@ -193,8 +193,8 @@ async function classifyWithLlm(
     issues_top: (audit?.issues ?? []).slice(0, 6).map((i) => i.title),
   };
 
-  // OpenAI-compatible: system prompt is the first message, not a separate
-  // top-level field. Response is choices[0].message.content (string).
+  // OpenAI-compatible (Gemini): system prompt is the first message, not a
+  // separate top-level field. Response is choices[0].message.content (string).
   const completion = await client.chat.completions.create({
     model: LLM_MODEL,
     max_tokens: 1500,

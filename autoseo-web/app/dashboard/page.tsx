@@ -3,6 +3,7 @@
 // (mostly client) panels.
 import { redirect } from "next/navigation";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
+import { LLM_MODEL, LLM_PROVIDER } from "@/lib/llm";
 import type {
   Agent,
   Company,
@@ -92,7 +93,11 @@ export default async function DashboardPage({
           initialProposals={data.proposals}
           agents={data.agents}
         />
-        <ChatPanel companyId={data.company.id} companyName={data.company.name} />
+        <ChatPanel
+          companyId={data.company.id}
+          companyName={data.company.name}
+          modelLabel={`${LLM_MODEL} · ${LLM_PROVIDER}`}
+        />
       </div>
     </main>
   );

@@ -1,9 +1,9 @@
 "use client";
 
 // Right panel — AI CMO chat. Posts to /api/chat which streams the model's
-// reply over SSE (Kimi 2.5 via MeshAPI). Server route loads the company +
-// pending proposals as context, so the model can answer questions about
-// "what should I do next" with grounding.
+// reply over SSE (Gemini via the OpenAI-compatible endpoint). Server route
+// loads the company + pending proposals as context, so the model can answer
+// questions about "what should I do next" with grounding.
 
 import { useRef, useState } from "react";
 
@@ -12,9 +12,14 @@ type Msg = { role: "user" | "assistant"; content: string };
 export function ChatPanel({
   companyId,
   companyName,
+  modelLabel,
 }: {
   companyId: string;
   companyName: string;
+  // e.g. "gemini-2.5-flash · gemini" — passed from the server component so we
+  // don't import server-only modules here, and so the label updates on every
+  // provider/model swap without code changes.
+  modelLabel: string;
 }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([
@@ -102,7 +107,7 @@ export function ChatPanel({
     <section className="panel flex h-[80vh] flex-col">
       <div className="panel-header">
         <span>AI CMO</span>
-        <span className="font-mono text-[11px] text-ink-3">kimi-k2.5 · meshapi</span>
+        <span className="font-mono text-[11px] text-ink-3">{modelLabel}</span>
       </div>
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((m, i) => (

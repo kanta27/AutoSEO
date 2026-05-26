@@ -1,5 +1,5 @@
 // POST /api/chat  { companyId, messages: [{role, content}] }  → SSE stream of
-// `{ delta }` chunks, terminated by `[DONE]`. Server-side only; the MeshAPI
+// `{ delta }` chunks, terminated by `[DONE]`. Server-side only; the Gemini
 // key never reaches the browser.
 
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     return jsonError(500, "Supabase not configured.");
   }
   if (!hasLlmKey()) {
-    return jsonError(500, "MESHAPI_API_KEY missing — chat is disabled.");
+    return jsonError(500, "GEMINI_API_KEY missing — chat is disabled.");
   }
 
   let body: ChatBody;
@@ -46,10 +46,11 @@ export async function POST(req: Request) {
   const ctx = await loadContext(body.companyId);
   if (!ctx) return jsonError(404, "Company not found.");
 
-  // OpenAI-compatible streaming through MeshAPI. The system prompt is the
-  // FIRST message (role:"system") — OpenAI doesn't have a top-level system
-  // param like Anthropic's SDK did. Re-emit `choices[0].delta.content` chunks
-  // as Server-Sent Events so the existing ChatPanel keeps working unchanged.
+  // OpenAI-compatible streaming through Gemini's compat endpoint. System
+  // prompt is the FIRST message (role:"system") — OpenAI/Gemini-compat don't
+  // have a separate top-level system param. Re-emit `choices[0].delta.content`
+  // chunks as Server-Sent Events so the existing ChatPanel keeps working
+  // unchanged.
   const client = llm();
   const stream = await client.chat.completions.create({
     model: LLM_MODEL,

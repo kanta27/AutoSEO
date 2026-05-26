@@ -1,9 +1,9 @@
 // POST /api/chat  { companyId, messages: [{role, content}] }  → SSE stream of
-// `{ delta }` chunks, terminated by `[DONE]`. Server-side only; the Anthropic
+// `{ delta }` chunks, terminated by `[DONE]`. Server-side only; the MeshAPI
 // key never reaches the browser.
 
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
-import { anthropic, hasAnthropicKey, CLAUDE_MODEL } from "@/lib/anthropic";
+import { llm, hasLlmKey, LLM_MODEL } from "@/lib/llm";
 import type { Company, CompanyDocument, Proposal } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
@@ -29,8 +29,8 @@ export async function POST(req: Request) {
   if (!hasSupabaseEnv()) {
     return jsonError(500, "Supabase not configured.");
   }
-  if (!hasAnthropicKey()) {
-    return jsonError(500, "ANTHROPIC_API_KEY missing — chat is disabled.");
+  if (!hasLlmKey()) {
+    return jsonError(500, "MESHAPI_API_KEY missing — chat is disabled.");
   }
 
   let body: ChatBody;
@@ -46,17 +46,19 @@ export async function POST(req: Request) {
   const ctx = await loadContext(body.companyId);
   if (!ctx) return jsonError(404, "Company not found.");
 
-  // The Anthropic Node SDK exposes .stream() returning an async iterable of
-  // events; we re-emit the text deltas as Server-Sent Events to the browser.
-  const client = anthropic();
-  const stream = await client.messages.stream({
-    model: CLAUDE_MODEL,
+  // OpenAI-compatible streaming through MeshAPI. The system prompt is the
+  // FIRST message (role:"system") — OpenAI doesn't have a top-level system
+  // param like Anthropic's SDK did. Re-emit `choices[0].delta.content` chunks
+  // as Server-Sent Events so the existing ChatPanel keeps working unchanged.
+  const client = llm();
+  const stream = await client.chat.completions.create({
+    model: LLM_MODEL,
     max_tokens: 1024,
-    system: [
-      { type: "text", text: SYSTEM_BASE, cache_control: { type: "ephemeral" } },
-      { type: "text", text: renderContext(ctx) },
+    stream: true,
+    messages: [
+      { role: "system", content: `${SYSTEM_BASE}\n\n${renderContext(ctx)}` },
+      ...body.messages.map((m) => ({ role: m.role, content: m.content })),
     ],
-    messages: body.messages.map((m) => ({ role: m.role, content: m.content })),
   });
 
   const encoder = new TextEncoder();
@@ -64,11 +66,9 @@ export async function POST(req: Request) {
     async start(controller) {
       try {
         for await (const event of stream) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
-            const chunk = `data: ${JSON.stringify({ delta: event.delta.text })}\n\n`;
+          const delta = event.choices?.[0]?.delta?.content;
+          if (typeof delta === "string" && delta.length > 0) {
+            const chunk = `data: ${JSON.stringify({ delta })}\n\n`;
             controller.enqueue(encoder.encode(chunk));
           }
         }

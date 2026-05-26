@@ -1,8 +1,9 @@
 "use client";
 
-// Right panel — AI CMO chat. Posts to /api/chat which streams Claude's reply
-// over SSE. Server route loads the company + pending proposals as context, so
-// the model can answer questions about "what should I do next" with grounding.
+// Right panel — AI CMO chat. Posts to /api/chat which streams the model's
+// reply over SSE (Kimi 2.5 via MeshAPI). Server route loads the company +
+// pending proposals as context, so the model can answer questions about
+// "what should I do next" with grounding.
 
 import { useRef, useState } from "react";
 
@@ -101,7 +102,7 @@ export function ChatPanel({
     <section className="panel flex h-[80vh] flex-col">
       <div className="panel-header">
         <span>AI CMO</span>
-        <span className="font-mono text-[11px] text-ink-3">claude-sonnet-4-6</span>
+        <span className="font-mono text-[11px] text-ink-3">kimi-k2.5 · meshapi</span>
       </div>
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((m, i) => (

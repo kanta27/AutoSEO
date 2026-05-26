@@ -2,17 +2,18 @@
 //
 // 1. Audit the URL via the Node engine (also seeds the dashboard's first
 //    Actions Feed card).
-// 2. Ask Claude to infer company name/description + first-pass documents.
+// 2. Ask the LLM (Kimi 2.5 via MeshAPI) to infer company name/description +
+//    first-pass documents.
 // 3. Insert companies + documents + one summary proposal.
 // 4. Return { companyId } so the client redirects to /dashboard?company=…
 //
 // All three of those degrade gracefully: if the engine is down we still create
-// the company with hostname-derived defaults; if Claude is missing we skip the
-// document generation.
+// the company with hostname-derived defaults; if the LLM key is missing we
+// skip the document generation.
 
 import { NextResponse } from "next/server";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
-import { anthropic, hasAnthropicKey, CLAUDE_MODEL } from "@/lib/anthropic";
+import { llm, hasLlmKey, LLM_MODEL } from "@/lib/llm";
 import { runNodeAudit, EngineUnavailableError } from "@/lib/engines/node-audit";
 import { proposalsFromAudit } from "@/lib/proposals";
 
@@ -76,12 +77,12 @@ export async function POST(req: Request) {
     console.warn("[onboard] audit failed:", auditError);
   }
 
-  // 2. Claude classification (graceful if no key or model errors).
+  // 2. LLM classification (graceful if no key or model errors).
   const fallback = fallbackClassify(url, audit?.meta?.title);
   let classified: ClassifyResult = fallback;
-  if (hasAnthropicKey()) {
+  if (hasLlmKey()) {
     try {
-      classified = await classifyWithClaude(url, audit);
+      classified = await classifyWithLlm(url, audit);
     } catch (err) {
       console.warn("[onboard] classify failed:", err instanceof Error ? err.message : err);
     }
@@ -174,16 +175,16 @@ function fallbackClassify(url: string, title?: string): ClassifyResult {
     description: title || `Company at ${host}`,
     category: "unknown",
     team_size: "unknown",
-    brand_voice_md: "_(Set ANTHROPIC_API_KEY to auto-generate brand voice notes from the homepage.)_",
-    product_info_md: "_(Set ANTHROPIC_API_KEY to auto-generate product info from the homepage.)_",
+    brand_voice_md: "_(Set MESHAPI_API_KEY to auto-generate brand voice notes from the homepage.)_",
+    product_info_md: "_(Set MESHAPI_API_KEY to auto-generate product info from the homepage.)_",
   };
 }
 
-async function classifyWithClaude(
+async function classifyWithLlm(
   url: string,
   audit: Awaited<ReturnType<typeof runNodeAudit>> | null
 ): Promise<ClassifyResult> {
-  const client = anthropic();
+  const client = llm();
   const context = {
     url,
     title: audit?.meta?.title ?? null,
@@ -192,11 +193,13 @@ async function classifyWithClaude(
     issues_top: (audit?.issues ?? []).slice(0, 6).map((i) => i.title),
   };
 
-  const msg = await client.messages.create({
-    model: CLAUDE_MODEL,
+  // OpenAI-compatible: system prompt is the first message, not a separate
+  // top-level field. Response is choices[0].message.content (string).
+  const completion = await client.chat.completions.create({
+    model: LLM_MODEL,
     max_tokens: 1500,
-    system: [{ type: "text", text: CLASSIFY_SYSTEM, cache_control: { type: "ephemeral" } }],
     messages: [
+      { role: "system", content: CLASSIFY_SYSTEM },
       {
         role: "user",
         content:
@@ -206,9 +209,7 @@ async function classifyWithClaude(
     ],
   });
 
-  const text = msg.content
-    .flatMap((b) => (b.type === "text" ? [b.text] : []))
-    .join("");
+  const text = completion.choices?.[0]?.message?.content ?? "";
   return parseClassifyJson(text) ?? fallbackClassify(url, audit?.meta?.title);
 }
 

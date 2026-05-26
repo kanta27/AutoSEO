@@ -1,6 +1,7 @@
 // Thin client over the existing Node SEO engine (autoseo-app's POST /api/audit).
 // The engine returns score+grade, prioritized issues, the GEO sub-audit, and
-// (when ANTHROPIC_API_KEY is set there) AI-written fixes for each issue.
+// (when its own optional ANTHROPIC_API_KEY is set there) AI-written fixes for
+// each issue. That engine has not been migrated to MeshAPI yet — see README.
 //
 // We intentionally do NOT import autoseo-app's modules directly — the engine
 // runs in its own process so we can keep the surfaces decoupled and scale them

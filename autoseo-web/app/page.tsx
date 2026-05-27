@@ -1,8 +1,10 @@
 // Landing page. Server component: lists agents straight from Supabase. The
-// URL input posts to /api/onboard which redirects to /dashboard.
+// URL input posts to /api/onboard which redirects to /dashboard. All counts
+// + signal lines are derived from real agent data — no faked numbers.
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
 import type { Agent } from "@/lib/supabase/types";
 import { OnboardForm } from "@/components/OnboardForm";
+import { AgentCard } from "@/components/AgentCard";
 
 export const dynamic = "force-dynamic";
 
@@ -25,29 +27,44 @@ export default async function LandingPage() {
   const live = agents.filter((a) => a.status === "live");
   const soon = agents.filter((a) => a.status === "coming_soon");
 
+  // Truthful signal line: only mention "more coming" when there actually are
+  // coming-soon agents in the catalog.
+  const signal =
+    live.length > 0
+      ? `${live.length} agent${live.length === 1 ? "" : "s"} live` +
+        (soon.length ? ` · ${soon.length} more coming` : "")
+      : null;
+
   return (
-    <main className="min-h-screen px-6 pb-24 pt-16 md:px-10">
+    <main className="min-h-screen px-6 pb-24 pt-8 md:px-10 md:pt-12">
       <div className="mx-auto max-w-5xl">
-        <header className="mb-10 flex items-center justify-between">
-          <div className="t-eyebrow">AutoSEO.live</div>
-          <a href="/dashboard" className="btn">
+        <header className="mb-12 flex items-center justify-between md:mb-16">
+          <div className="flex items-center gap-2">
+            <span
+              aria-hidden
+              className="inline-block h-2 w-2 rounded-full bg-accent"
+            />
+            <span className="t-eyebrow !text-ink">AutoSEO.live</span>
+          </div>
+          <a href="/dashboard" className="btn text-[13px]">
             Open dashboard
           </a>
         </header>
 
-        <section className="mb-12 text-center">
-          <p className="t-eyebrow mb-4">New — GEO Agent · Citations on AI engines</p>
-          <h1 className="t-display mb-6">
-            Meet AutoSEO,<br />the autonomous CMO
+        <section className="mb-14 text-center md:mb-20">
+          {signal && <p className="t-eyebrow mb-5">{signal}</p>}
+          <h1 className="t-display mx-auto mb-6 max-w-3xl">
+            Meet AutoSEO,<br className="hidden sm:block" />
+            <span className="italic-serif">the autonomous CMO</span>
           </h1>
-          <p className="mx-auto max-w-xl text-[17px] leading-[1.5] text-ink-2">
+          <p className="mx-auto mb-9 max-w-xl text-[17px] leading-[1.55] text-ink-2">
             One agent stack that audits your site, drafts the fixes, and keeps
             optimizing across Google and every AI answer engine.
           </p>
 
-          <div className="mx-auto mt-8 max-w-xl">
+          <div className="mx-auto max-w-xl">
             <OnboardForm />
-            <p className="mt-3 text-[12px] text-ink-3">
+            <p className="mt-4 text-[12px] text-ink-3">
               Free to start · No credit card required
             </p>
           </div>
@@ -56,48 +73,47 @@ export default async function LandingPage() {
         {agents.length === 0 ? (
           <ConnectSupabaseHint />
         ) : (
-          <>
-            <p className="t-eyebrow mb-4 text-center">
-              {live.length} live · {soon.length} coming soon
-            </p>
+          <section aria-labelledby="agents-heading">
+            <div className="mb-6 flex items-end justify-between gap-4">
+              <div>
+                <p className="t-eyebrow mb-2">The roster</p>
+                <h2
+                  id="agents-heading"
+                  className="t-h2 max-w-xl"
+                >
+                  Every agent working on your growth
+                </h2>
+              </div>
+              <p className="hidden max-w-[260px] text-right text-[13px] leading-[1.5] text-ink-3 md:block">
+                Drafts every move and routes it to your Actions Feed —
+                you approve before anything ships.
+              </p>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {[...live, ...soon].map((a) => (
                 <AgentCard key={a.id} agent={a} />
               ))}
             </div>
-          </>
+          </section>
         )}
       </div>
     </main>
   );
 }
 
-function AgentCard({ agent }: { agent: Agent }) {
-  const isLive = agent.status === "live";
-  return (
-    <div className="panel p-5">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[15px] font-semibold text-ink">{agent.name}</h3>
-        <span className={isLive ? "chip chip-live" : "chip chip-soon"}>
-          {isLive ? "Live" : "Soon"}
-        </span>
-      </div>
-      <p className="text-[13px] leading-[1.5] text-ink-3">
-        {agent.description || "—"}
-      </p>
-    </div>
-  );
-}
-
 function ConnectSupabaseHint() {
   return (
-    <div className="panel mx-auto max-w-2xl p-6 text-center">
+    <div className="panel mx-auto max-w-2xl p-7 text-center">
       <h3 className="t-h2 mb-2">Connect Supabase to see the agent catalog</h3>
-      <p className="text-[14px] text-ink-3">
+      <p className="text-[14px] leading-[1.55] text-ink-3">
         Set <code className="font-mono text-[12px]">SUPABASE_URL</code> and{" "}
         <code className="font-mono text-[12px]">SUPABASE_SERVICE_ROLE_KEY</code>{" "}
         in <code className="font-mono text-[12px]">.env.local</code>, then run the
-        SQL in <code className="font-mono text-[12px]">supabase/migrations/0001_init.sql</code>.
+        SQL in{" "}
+        <code className="font-mono text-[12px]">
+          supabase/migrations/0001_init.sql
+        </code>
+        .
       </p>
     </div>
   );

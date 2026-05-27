@@ -46,6 +46,10 @@
     text-transform: uppercase;
     color: #5c544a;
   }
+  .italic-serif {
+    font-family: "Instrument Serif", "Times New Roman", serif;
+    font-style: italic;
+  }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-full border px-[18px] py-[10px] text-[14px] font-medium shadow-elev-1 transition;
     border-color: rgba(20, 18, 16, 0.18);

@@ -1,11 +1,12 @@
-// The 4-panel dashboard. Server component: loads the company + documents +
-// latest run's audit summary + pending proposals, then hands them to the
-// (mostly client) panels.
+// The 4-panel dashboard + full-width Activity section. Server component:
+// loads the company + documents + proposals + agents + recent runs in one
+// fan-out, then hands them to the (mostly client) panels.
 import { redirect } from "next/navigation";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
 import { LLM_MODEL, LLM_PROVIDER } from "@/lib/llm";
 import type {
   Agent,
+  AgentRun,
   Company,
   CompanyDocument,
   Proposal,
@@ -14,6 +15,8 @@ import { CompanyPanel } from "@/components/CompanyPanel";
 import { AnalyticsPanel } from "@/components/AnalyticsPanel";
 import { ActionsFeed } from "@/components/ActionsFeed";
 import { ChatPanel } from "@/components/ChatPanel";
+import { RunAllButton } from "@/components/RunAllButton";
+import { ActivitySection, joinActivity } from "@/components/ActivitySection";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +25,8 @@ type DashboardData = {
   documents: CompanyDocument[];
   proposals: Proposal[];
   agents: Agent[];
+  recentRuns: AgentRun[];
+  allCompanies: Company[];
 };
 
 async function loadDashboard(companyId?: string): Promise<DashboardData | null> {
@@ -35,7 +40,7 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
   const { data: company } = await companyQuery;
   if (!company) return null;
 
-  const [docsRes, propsRes, agentsRes] = await Promise.all([
+  const [docsRes, propsRes, agentsRes, runsRes, allCompaniesRes] = await Promise.all([
     sb
       .from("documents")
       .select("*")
@@ -48,6 +53,14 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
       .order("created_at", { ascending: false })
       .limit(200),
     sb.from("agents").select("*").order("name"),
+    // Activity is GLOBAL (across companies) so the user can see what the
+    // scheduler did everywhere, not just the company they're viewing.
+    sb
+      .from("agent_runs")
+      .select("*")
+      .order("started_at", { ascending: false })
+      .limit(20),
+    sb.from("companies").select("*"),
   ]);
 
   return {
@@ -55,6 +68,8 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
     documents: (docsRes.data ?? []) as CompanyDocument[],
     proposals: (propsRes.data ?? []) as Proposal[],
     agents: (agentsRes.data ?? []) as Agent[],
+    recentRuns: (runsRes.data ?? []) as AgentRun[],
+    allCompanies: (allCompaniesRes.data ?? []) as Company[],
   };
 }
 
@@ -77,12 +92,17 @@ export default async function DashboardPage({
   const data = await loadDashboard(searchParams.company);
   if (!data) redirect("/");
 
+  const activityRows = joinActivity(data.recentRuns, data.agents, data.allCompanies);
+
   return (
     <main className="min-h-screen px-4 py-6 md:px-6">
-      <header className="mx-auto mb-6 flex max-w-[1500px] items-center justify-between">
+      <header className="mx-auto mb-6 flex max-w-[1500px] items-center justify-between gap-4">
         <a href="/" className="t-eyebrow">AutoSEO.live</a>
-        <div className="flex items-center gap-2 text-[12px] text-ink-3">
-          <span className="font-mono">{data.company.url}</span>
+        <div className="flex items-center gap-4">
+          <span className="hidden font-mono text-[12px] text-ink-3 sm:inline">
+            {data.company.url}
+          </span>
+          <RunAllButton />
         </div>
       </header>
       <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_360px_360px]">
@@ -98,6 +118,9 @@ export default async function DashboardPage({
           companyName={data.company.name}
           modelLabel={`${LLM_MODEL} · ${LLM_PROVIDER}`}
         />
+      </div>
+      <div className="mx-auto max-w-[1500px]">
+        <ActivitySection runs={activityRows} />
       </div>
     </main>
   );

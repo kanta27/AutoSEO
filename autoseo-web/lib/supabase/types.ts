@@ -32,6 +32,7 @@ export type Agent = {
   status: "live" | "coming_soon";
   enabled: boolean;
   description: string | null;
+  schedule_hours: number; // added by migration 0002
 };
 
 export type ProposalStatus = "pending" | "approved" | "rejected" | "archived";
@@ -57,4 +58,5 @@ export type AgentRun = {
   started_at: string;
   finished_at: string | null;
   error: string | null;
+  proposals_created: number; // added by migration 0002
 };

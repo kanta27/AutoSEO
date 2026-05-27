@@ -162,6 +162,96 @@ autoseo-app (Node Express, the SEO/GEO engine)
 
 ---
 
+## Autonomy — the scheduler
+
+The scheduler is the autonomous half of AutoSEO: the same agents that the
+manual "Run SEO + GEO audit" button triggers, fired automatically on a
+configurable interval, dropping their output into the Actions Feed as
+`pending` proposals. **Nothing auto-approves or auto-publishes** — every
+agent output still waits for your Approve/Reject click.
+
+### Migration
+
+Before first use, run `supabase/migrations/0002_scheduler.sql` in your
+Supabase SQL editor. It adds `agents.schedule_hours` (default 24) and
+`agent_runs.proposals_created`. Safe to re-run.
+
+### Two entry points, one library
+
+| Endpoint | Auth | Respects schedule? | Used by |
+|---|---|---|---|
+| `POST /api/scheduler/run` | `x-scheduler-secret` header | **Yes** (only runs agents whose `schedule_hours` has elapsed) | Cron — Vercel Cron, Cloud Scheduler, crontab |
+| `POST /api/scheduler/run-now` | Same-origin only (no secret) | **No** (always runs every live agent) | The "Run all agents now" dashboard button |
+
+Both call the same `runAllDue()` library function. The asymmetry is
+deliberate: a cron firing every minute should only do work when there is
+work; a user clicking a button is signalling "I want results now."
+
+### "Due" logic
+
+For each company × live+enabled agent, the scheduler picks the latest
+successful `agent_runs` row (status='done'). The agent is due if no
+successful run exists or the last one is older than `schedule_hours`.
+A stuck `running` row does NOT suppress retries (so a crash mid-run can't
+deadlock the agent forever).
+
+Agents that share an underlying engine (SEO + GEO both run from one Node
+audit) are grouped and the engine is called once; both agents still get
+their own `agent_runs` row with the proposal count attributed correctly.
+
+### Local timer
+
+Set `ENABLE_LOCAL_SCHEDULER=true` (with optional
+`LOCAL_SCHEDULER_INTERVAL_MINUTES=15`) and the in-process timer in
+`lib/scheduler/local.ts` will check every interval. Started by Next's
+`instrumentation.ts` hook at server boot; re-entry-guarded so a slow tick
+doesn't overlap a fast one; gated again on the env flag so it never runs
+when you don't ask for it.
+
+This works only while the Next process is up. For real 24/7 autonomy you
+need a deployment that always has a process (a small VM with the same env
+flag set) **or** a serverless deploy + external cron (see below).
+
+### Test it (the curl recipe)
+
+```powershell
+# 1. Run the migration. Set SCHEDULER_SECRET in .env.local (any random string).
+# 2. Boot autoseo-app and autoseo-web.
+
+# 3. With secret (cron path, respects dueness):
+curl -X POST -H "x-scheduler-secret: $env:SCHEDULER_SECRET" `
+  http://localhost:3001/api/scheduler/run
+# Expect on first call:  {"companies": N, "agentsRun": M, "proposalsCreated": …}
+# Expect on second call: {"companies": N, "agentsRun": 0, "proposalsCreated": 0, …}
+#   (nothing is due yet because the first call just ran them)
+
+# 4. Without the secret → 401:
+curl -X POST http://localhost:3001/api/scheduler/run        # → 401 Unauthorized
+
+# 5. In the dashboard: click "Run all agents now" — the Activity section at
+#    the bottom should grow new rows (done · proposals count), and the
+#    Actions Feed should show fresh pending items.
+```
+
+### Deploying for true 24/7 (later session)
+
+Pick one:
+
+- **Vercel Cron** — add a `vercel.json` with a `crons` entry pointing at
+  `/api/scheduler/run` and store `SCHEDULER_SECRET` as a Vercel env. Vercel
+  cron requests must carry the header — easiest is a tiny wrapper route or
+  use Vercel's secret-headers config.
+- **External crontab** — any cron service that can POST with custom headers
+  (cron-job.org, Cloud Scheduler) pointed at the public URL with the
+  secret header.
+- **Always-on VM** — set `ENABLE_LOCAL_SCHEDULER=true` and run
+  `next start` under PM2 / systemd. The local timer handles the rest.
+
+The current code is ready for any of these — the endpoint is the only
+contract. Picking + wiring one is a separate session.
+
+---
+
 ## Type-check
 
 ```powershell

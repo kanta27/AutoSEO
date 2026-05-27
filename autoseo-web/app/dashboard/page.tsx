@@ -27,6 +27,10 @@ type DashboardData = {
   agents: Agent[];
   recentRuns: AgentRun[];
   allCompanies: Company[];
+  // Exact count of failed agent_runs across all time. Powers the "Clear
+  // failed (N)" affordance in the Activity header — the displayed window
+  // is capped to 20, so we count separately to be accurate.
+  failedRunsCount: number;
 };
 
 async function loadDashboard(companyId?: string): Promise<DashboardData | null> {
@@ -40,28 +44,35 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
   const { data: company } = await companyQuery;
   if (!company) return null;
 
-  const [docsRes, propsRes, agentsRes, runsRes, allCompaniesRes] = await Promise.all([
-    sb
-      .from("documents")
-      .select("*")
-      .eq("company_id", company.id)
-      .order("created_at", { ascending: true }),
-    sb
-      .from("proposals")
-      .select("*")
-      .eq("company_id", company.id)
-      .order("created_at", { ascending: false })
-      .limit(200),
-    sb.from("agents").select("*").order("name"),
-    // Activity is GLOBAL (across companies) so the user can see what the
-    // scheduler did everywhere, not just the company they're viewing.
-    sb
-      .from("agent_runs")
-      .select("*")
-      .order("started_at", { ascending: false })
-      .limit(20),
-    sb.from("companies").select("*"),
-  ]);
+  const [docsRes, propsRes, agentsRes, runsRes, allCompaniesRes, failedCountRes] =
+    await Promise.all([
+      sb
+        .from("documents")
+        .select("*")
+        .eq("company_id", company.id)
+        .order("created_at", { ascending: true }),
+      sb
+        .from("proposals")
+        .select("*")
+        .eq("company_id", company.id)
+        .order("created_at", { ascending: false })
+        .limit(200),
+      sb.from("agents").select("*").order("name"),
+      // Activity is GLOBAL (across companies) so the user can see what the
+      // scheduler did everywhere, not just the company they're viewing.
+      sb
+        .from("agent_runs")
+        .select("*")
+        .order("started_at", { ascending: false })
+        .limit(20),
+      sb.from("companies").select("*"),
+      // head:true skips the row payload, returning only the count — cheap
+      // even if the table has thousands of stale failed rows.
+      sb
+        .from("agent_runs")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "failed"),
+    ]);
 
   return {
     company: company as Company,
@@ -70,6 +81,7 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
     agents: (agentsRes.data ?? []) as Agent[],
     recentRuns: (runsRes.data ?? []) as AgentRun[],
     allCompanies: (allCompaniesRes.data ?? []) as Company[],
+    failedRunsCount: failedCountRes.count ?? 0,
   };
 }
 
@@ -121,7 +133,7 @@ export default async function DashboardPage({
         />
       </div>
       <div className="mx-auto max-w-[1500px]">
-        <ActivitySection runs={activityRows} />
+        <ActivitySection runs={activityRows} failedCount={data.failedRunsCount} />
       </div>
     </main>
   );

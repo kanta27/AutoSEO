@@ -264,8 +264,15 @@ seedDefaults()
   .then(() => startAgentScheduler())
   .catch((err) => console.warn("[agents] startup failed:", err.message));
 
-const server = app.listen(PORT, () => {
-  console.log(`\n  AutoSEO running → http://localhost:${PORT}`);
+// Bind explicitly to 0.0.0.0 so both `localhost:PORT` and `127.0.0.1:PORT`
+// resolve to a reachable socket regardless of the host's IPv4/IPv6 preference.
+// (Without this, Node 17+ defaults can bind IPv6-only on some Windows boxes,
+// which breaks `127.0.0.1` clients — and vice-versa.) The web app's audit
+// fetcher has a one-shot loopback fallback for safety, but binding to all
+// IPv4 interfaces makes the fallback unnecessary in practice.
+const HOST = process.env.HOST || "0.0.0.0";
+const server = app.listen(PORT, HOST, () => {
+  console.log(`\n  AutoSEO running → http://localhost:${PORT}  (bound ${HOST}:${PORT})`);
   console.log(
     `  Claude fixes: ${
       process.env.ANTHROPIC_API_KEY ? "ON" : "OFF (set ANTHROPIC_API_KEY to enable)"

@@ -5,6 +5,7 @@
 // Shows the most recent agent invocations across all companies so the user
 // can audit "what did the autonomous swarm do while I was away".
 import type { AgentRun, Agent, Company } from "@/lib/supabase/types";
+import { ClearFailedButton } from "./ClearFailedButton";
 
 export type ActivityRow = AgentRun & {
   // Joined locally by the dashboard page from the agents + companies it
@@ -15,16 +16,24 @@ export type ActivityRow = AgentRun & {
 
 export function ActivitySection({
   runs,
+  failedCount,
 }: {
   runs: ActivityRow[];
+  // Count of ALL failed rows in agent_runs, not just within the displayed
+  // window — so the confirm dialog tells the user the real number. Zero
+  // hides the Clear-failed button entirely.
+  failedCount: number;
 }) {
   return (
     <section className="panel mt-4 lg:col-span-4">
       <div className="panel-header">
         <span>Activity</span>
-        <span className="font-mono text-[11px] text-ink-3">
-          last {runs.length} run{runs.length === 1 ? "" : "s"}
-        </span>
+        <div className="flex items-center gap-3">
+          <ClearFailedButton failedCount={failedCount} />
+          <span className="font-mono text-[11px] text-ink-3">
+            last {runs.length} run{runs.length === 1 ? "" : "s"}
+          </span>
+        </div>
       </div>
       {runs.length === 0 ? (
         <p className="p-5 text-[13px] text-ink-3">

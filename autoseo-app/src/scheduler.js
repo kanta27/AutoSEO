@@ -32,7 +32,14 @@ export function startScheduler({ runAudit }) {
             });
             refreshed++;
           } catch (err) {
-            console.warn(`[scheduler] ${e.url}: ${err.message}`);
+            // Per-URL failures are usually stale cached entries pointing at a
+            // dev-only host that's no longer up. Logging every one of those on
+            // each tick looks like an error storm but is harmless. Surface
+            // only when AUTOSEO_DEBUG=1; the aggregate "tick failed" path and
+            // the "refreshed N entries" line remain unconditional.
+            if (process.env.AUTOSEO_DEBUG === "1") {
+              console.warn(`[scheduler] ${e.url}: ${err.message}`);
+            }
           }
         }
       }

@@ -19,6 +19,7 @@ import "server-only";
 import { runNodeAudit } from "@/lib/engines/node-audit";
 import { proposalsFromAudit, type NewProposal } from "@/lib/proposals";
 import { runBlogAgent } from "@/lib/agents/blog/agent";
+import { runSeoFixAgent } from "@/lib/agents/seo-fix/agent";
 import type { Company } from "@/lib/supabase/types";
 
 export type RunnerCompany = Pick<Company, "id" | "url" | "name"> & {
@@ -43,7 +44,7 @@ export type Runner = (
   runIds: Record<string, string>,
 ) => Promise<RunnerResult>;
 
-export type RunnerId = "node-audit" | "blog-agent";
+export type RunnerId = "node-audit" | "blog-agent" | "seo-fix-agent";
 
 export const RUNNERS: Record<RunnerId, Runner> = {
   "node-audit": async (company) => {
@@ -54,6 +55,13 @@ export const RUNNERS: Record<RunnerId, Runner> = {
     const result = await runBlogAgent(company as Company, runIds["blog"]);
     return { proposals: result.proposals, failure: result.failure ?? undefined };
   },
+  "seo-fix-agent": async (company, runIds) => {
+    // Reads pending SEO findings from the proposals table and proposes a
+    // code-level fix (PR via GitHub connector on approval). Single-tenant
+    // env-based GitHub creds for now; per-company creds is a future session.
+    const result = await runSeoFixAgent(company as Company, runIds["coding"]);
+    return { proposals: result.proposals, failure: result.failure ?? undefined };
+  },
 };
 
 // Agent → runner. Live agents not in this map are "live in catalog but no
@@ -62,5 +70,5 @@ export const RUNNER_BY_AGENT: Record<string, RunnerId> = {
   seo: "node-audit",
   geo: "node-audit",
   blog: "blog-agent",
-  // coding: pending — auto-fix path is a future session
+  coding: "seo-fix-agent",
 };

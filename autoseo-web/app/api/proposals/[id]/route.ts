@@ -13,13 +13,18 @@
 
 import { NextResponse } from "next/server";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
-import { getPublisher } from "@/lib/connectors";
+import {
+  getPublisher,
+  openPullRequest,
+  GitHubNotConfiguredError,
+  GitHubOperationError,
+} from "@/lib/connectors";
 import {
   CmsNotConfiguredError,
   CmsPublishError,
   type BlogDraft,
 } from "@/lib/connectors/types";
-import type { Company, Proposal } from "@/lib/supabase/types";
+import type { CodeChangePayload, Company, Proposal } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 
@@ -56,7 +61,9 @@ export async function POST(
   }
   const p = proposal as Proposal;
   const isRetryablePublishFail =
-    decision === "approved" && p.status === "publish_failed" && p.type === "blog_post";
+    decision === "approved" &&
+    p.status === "publish_failed" &&
+    (p.type === "blog_post" || p.type === "code_change");
   if (p.status !== "pending" && !isRetryablePublishFail) {
     return NextResponse.json(
       { error: `Proposal already ${p.status}.` },
@@ -78,9 +85,11 @@ export async function POST(
     return NextResponse.json({ proposal: data });
   }
 
-  // Approval. For blog_post we run the publish step; for other types we just
-  // mark approved (real publish actions for those types land in future sessions).
-  if (p.type !== "blog_post") {
+  // Approval. We have three publish paths today:
+  //   • blog_post   → CMS connector (Shopify/WordPress/manual)
+  //   • code_change → GitHub connector (opens a PR)
+  //   • everything else → simple state flip to 'approved'
+  if (p.type !== "blog_post" && p.type !== "code_change") {
     const { data, error } = await sb
       .from("proposals")
       .update({ status: "approved", decided_at: new Date().toISOString() })
@@ -93,10 +102,7 @@ export async function POST(
     return NextResponse.json({ proposal: data });
   }
 
-  // blog_post approval. Dispatch by the company's detected platform:
-  //   shopify / wordpress → call the matching connector
-  //   unknown / unsupported → MANUAL mode: mark approved but DON'T publish.
-  //                            The UI surfaces Copy-markdown buttons.
+  // Both publish paths need the company row.
   const { data: company } = await sb
     .from("companies")
     .select("id, url, name, description, profile, created_at, platform, platform_meta")
@@ -106,6 +112,68 @@ export async function POST(
     return NextResponse.json({ error: "Company not found." }, { status: 404 });
   }
   const co = company as Company;
+
+  // -------------------------------------------------------------------------
+  // code_change → GitHub PR. Mirrors the publish-failed-is-retryable pattern.
+  if (p.type === "code_change") {
+    const payload = p.payload as unknown as CodeChangePayload;
+    try {
+      const pr = await openPullRequest(co, {
+        branchName: payload.suggested_branch,
+        commitMessage: payload.suggested_pr_title,
+        prTitle: payload.suggested_pr_title,
+        prBody: payload.suggested_pr_body,
+        files: payload.files,
+      });
+      const { data, error } = await sb
+        .from("proposals")
+        .update({
+          status: "published",
+          publish_url: pr.url,
+          publish_error: null,
+          decided_at: new Date().toISOString(),
+        })
+        .eq("id", params.id)
+        .select("*")
+        .single();
+      if (error || !data) {
+        // The PR opened externally; preserve the URL so the user can find it.
+        return NextResponse.json({
+          proposal: { ...p, status: "published", publish_url: pr.url },
+          warning: `PR opened at ${pr.url} but failed to record: ${error?.message}`,
+        });
+      }
+      return NextResponse.json({ proposal: data });
+    } catch (err) {
+      const msg =
+        err instanceof GitHubNotConfiguredError
+          ? err.message
+          : err instanceof GitHubOperationError
+          ? err.message
+          : err instanceof Error
+          ? err.message
+          : "GitHub call failed.";
+      const { data } = await sb
+        .from("proposals")
+        .update({
+          status: "publish_failed",
+          publish_error: msg.slice(0, 500),
+        })
+        .eq("id", params.id)
+        .select("*")
+        .single();
+      return NextResponse.json(
+        { proposal: data ?? p, error: msg },
+        { status: 422 },
+      );
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // blog_post approval. Dispatch by the company's detected platform:
+  //   shopify / wordpress → call the matching connector
+  //   unknown / unsupported → MANUAL mode: mark approved but DON'T publish.
+  //                            The UI surfaces Copy-markdown buttons.
 
   const publisher = getPublisher(co.platform);
 

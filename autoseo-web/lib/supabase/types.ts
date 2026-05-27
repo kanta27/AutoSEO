@@ -62,6 +62,20 @@ export type Proposal = {
   publish_error: string | null; // added by migration 0003 (set on publish_failed)
 };
 
+// Payload shape for `code_change` proposals — emitted by code-fix agents
+// (currently `coding`; future SEO-fix/GEO-fix sessions will share the type).
+// Approving such a proposal opens a Pull Request via lib/connectors/github.ts;
+// rejecting is a clean state flip (no GitHub call). Files carry the FULL
+// replacement content — we don't apply diffs.
+export type CodeChangePayload = {
+  source_agent: "seo" | "geo" | "blog" | string;
+  rationale: string;
+  files: Array<{ path: string; content: string }>;
+  suggested_branch: string;
+  suggested_pr_title: string;
+  suggested_pr_body: string; // markdown
+};
+
 export type AgentRun = {
   id: string;
   company_id: string;

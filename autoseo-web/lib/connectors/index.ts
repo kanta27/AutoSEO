@@ -27,3 +27,16 @@ export function getPublisher(platform: CompanyPlatform): Publisher | null {
 // live in. Keeps the public surface small.
 export type { Publisher, BlogDraft, PublishResult } from "./types";
 export { CmsNotConfiguredError, CmsPublishError } from "./types";
+
+// GitHub connector — used for `code_change` proposals (not blog posts). Not
+// part of getPublisher() because the dispatch axis is different: getPublisher
+// keys off the company's detected CMS platform, while GitHub publishing keys
+// off the proposal `type` instead. The approval handler picks the right one.
+export {
+  openPullRequest,
+  isGitHubConfigured,
+  GitHubNotConfiguredError,
+  GitHubOperationError,
+  type OpenPullRequestInput,
+  type OpenPullRequestResult,
+} from "./github";

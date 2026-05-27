@@ -194,6 +194,7 @@ function ProposalCard({
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const isBlog = proposal.type === "blog_post";
+  const isCodeChange = proposal.type === "code_change";
   const isActionable =
     !archivable && (proposal.status === "pending" || proposal.status === "publish_failed");
   // Manual-mode = a blog_post that the user approved but no auto-publisher
@@ -224,6 +225,14 @@ function ProposalCard({
         />
       )}
 
+      {isCodeChange && (
+        <CodeChangePreview
+          proposal={proposal}
+          open={previewOpen}
+          onToggle={() => setPreviewOpen((v) => !v)}
+        />
+      )}
+
       {proposal.status === "published" && proposal.publish_url && (
         <a
           href={proposal.publish_url}
@@ -231,7 +240,7 @@ function ProposalCard({
           rel="noreferrer"
           className="mt-2 inline-flex text-[12px] font-medium text-ok hover:underline"
         >
-          View live →
+          {isCodeChange ? "View PR →" : "View live →"}
         </a>
       )}
       {proposal.status === "publish_failed" && proposal.publish_error && (
@@ -250,7 +259,11 @@ function ProposalCard({
             onClick={() => onDecide("approved")}
           >
             {proposal.status === "publish_failed"
-              ? "Retry publish"
+              ? isCodeChange
+                ? "Retry PR"
+                : "Retry publish"
+              : isCodeChange
+              ? "Open Pull Request"
               : isBlog && companyPlatform === "unknown"
               ? "Approve (manual copy)"
               : "Approve"}
@@ -417,6 +430,97 @@ function BlogPreview({
               </ul>
             </div>
           ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CodeChangePreview({
+  proposal,
+  open,
+  onToggle,
+}: {
+  proposal: Proposal;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const payload = proposal.payload as {
+    source_agent?: string;
+    rationale?: string;
+    files?: Array<{ path: string; content: string }>;
+    suggested_branch?: string;
+    suggested_pr_title?: string;
+    suggested_pr_body?: string;
+    finding_title?: string;
+  };
+  const files = payload.files ?? [];
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="text-[11px] font-medium uppercase tracking-wider text-ink-3 hover:text-ink"
+      >
+        {open ? "Hide changes ▴" : `Show changes (${files.length} file${files.length === 1 ? "" : "s"}) ▾`}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 rounded-md border border-line bg-card p-3 text-[12px] text-ink-2">
+          {payload.source_agent && (
+            <div>
+              <span className="t-eyebrow">Source agent</span>
+              <div className="mt-1 font-mono text-[12px]">{payload.source_agent}</div>
+            </div>
+          )}
+          {payload.finding_title && (
+            <div>
+              <span className="t-eyebrow">Finding</span>
+              <p className="mt-1">{payload.finding_title}</p>
+            </div>
+          )}
+          {payload.rationale && (
+            <div>
+              <span className="t-eyebrow">Rationale</span>
+              <p className="mt-1">{payload.rationale}</p>
+            </div>
+          )}
+          {payload.suggested_branch && (
+            <div>
+              <span className="t-eyebrow">Branch</span>
+              <div className="mt-1 font-mono text-[12px]">{payload.suggested_branch}</div>
+            </div>
+          )}
+          {payload.suggested_pr_title && (
+            <div>
+              <span className="t-eyebrow">PR title</span>
+              <p className="mt-1">{payload.suggested_pr_title}</p>
+            </div>
+          )}
+          {files.length > 0 && (
+            <div>
+              <span className="t-eyebrow">Files</span>
+              <ul className="mt-1 space-y-2">
+                {files.map((f, i) => (
+                  <li key={i}>
+                    <div className="font-mono text-[11px] text-ink-3">{f.path}</div>
+                    <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap rounded bg-card-2 p-2 text-[11px] leading-[1.45]">
+                      {(f.content ?? "").slice(0, 2000)}
+                      {(f.content ?? "").length > 2000 ? "\n…" : ""}
+                    </pre>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {payload.suggested_pr_body && (
+            <div>
+              <span className="t-eyebrow">PR body</span>
+              <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap font-sans text-[12px] leading-[1.55]">
+                {payload.suggested_pr_body}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>

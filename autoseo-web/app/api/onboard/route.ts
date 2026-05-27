@@ -16,6 +16,7 @@ import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
 import { llm, hasLlmKey, LLM_MODEL } from "@/lib/llm";
 import { runNodeAudit, EngineUnavailableError } from "@/lib/engines/node-audit";
 import { proposalsFromAudit } from "@/lib/proposals";
+import { detectPlatform } from "@/lib/connectors/detect";
 
 export const runtime = "nodejs";
 
@@ -88,7 +89,14 @@ export async function POST(req: Request) {
     }
   }
 
-  // 3. Insert company.
+  // 3. Detect the CMS platform — best-effort, never blocks onboarding. The
+  // detector swallows all errors internally and returns 'unknown' on failure.
+  const detection = await detectPlatform(url).catch(() => ({
+    platform: "unknown" as const,
+    meta: { error: "detection threw" },
+  }));
+
+  // 4. Insert company (now with platform + platform_meta).
   const { data: company, error: companyErr } = await sb
     .from("companies")
     .insert({
@@ -102,6 +110,8 @@ export async function POST(req: Request) {
         audit_grade: audit?.grade ?? null,
         first_audited_at: audit?.meta?.fetchedAt ?? null,
       },
+      platform: detection.platform,
+      platform_meta: detection.meta,
     })
     .select("id")
     .single();

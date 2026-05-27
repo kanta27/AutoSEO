@@ -10,26 +10,49 @@
 //   2. RUNNER_BY_AGENT maps each live agent_key to its runner id.
 //   3. The scheduler groups due agents by runner id, fires each runner once,
 //      and attributes the resulting proposals back per agent_key.
+//
+// Runners receive a `runIds` map (agent_key → agent_runs.id). LLM-driven
+// agents use it to write per-step trace rows into agent_logs; non-LLM
+// runners (the Node audit HTTP call) ignore it.
 import "server-only";
 
 import { runNodeAudit } from "@/lib/engines/node-audit";
 import { proposalsFromAudit, type NewProposal } from "@/lib/proposals";
+import { runBlogAgent } from "@/lib/agents/blog/agent";
+import type { Company } from "@/lib/supabase/types";
 
-export type RunnerCompany = { id: string; url: string; name: string };
-
-export type RunnerResult = {
-  // Flat list — each proposal carries its own agent_key already.
-  proposals: NewProposal[];
+export type RunnerCompany = Pick<Company, "id" | "url" | "name"> & {
+  // The runner only needs identity + the URL/name. We pass the full Company
+  // shape (cast at the call site) to LLM-driven agents that need profile/
+  // documents context.
+  description?: Company["description"];
+  profile?: Company["profile"];
+  created_at?: Company["created_at"];
 };
 
-export type Runner = (company: RunnerCompany) => Promise<RunnerResult>;
+export type RunnerResult = {
+  proposals: NewProposal[];
+  // Optional structured failure info — only surfaced when the runner couldn't
+  // produce proposals but didn't throw (e.g. the LLM ran out of step budget).
+  // The scheduler will fold this into the summary's `failures` array.
+  failure?: string;
+};
 
-export type RunnerId = "node-audit";
+export type Runner = (
+  company: RunnerCompany,
+  runIds: Record<string, string>,
+) => Promise<RunnerResult>;
+
+export type RunnerId = "node-audit" | "blog-agent";
 
 export const RUNNERS: Record<RunnerId, Runner> = {
   "node-audit": async (company) => {
     const report = await runNodeAudit(company.url, { withFixes: true });
     return { proposals: proposalsFromAudit(report) };
+  },
+  "blog-agent": async (company, runIds) => {
+    const result = await runBlogAgent(company as Company, runIds["blog"]);
+    return { proposals: result.proposals, failure: result.failure ?? undefined };
   },
 };
 
@@ -38,5 +61,6 @@ export const RUNNERS: Record<RunnerId, Runner> = {
 export const RUNNER_BY_AGENT: Record<string, RunnerId> = {
   seo: "node-audit",
   geo: "node-audit",
+  blog: "blog-agent",
   // coding: pending — auto-fix path is a future session
 };

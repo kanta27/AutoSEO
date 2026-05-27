@@ -112,6 +112,7 @@ export default async function DashboardPage({
           companyId={data.company.id}
           initialProposals={data.proposals}
           agents={data.agents}
+          companyPlatform={data.company.platform}
         />
         <ChatPanel
           companyId={data.company.id}

@@ -57,7 +57,9 @@ export async function runAllDue(opts: RunAllOptions): Promise<SchedulerSummary> 
   const sb = supabaseServer();
 
   const [{ data: companies }, { data: agents }] = await Promise.all([
-    sb.from("companies").select("id, url, name"),
+    // LLM-driven runners (blog agent and future ones) read description +
+    // profile via tool calls, so we hydrate the full row up front.
+    sb.from("companies").select("id, url, name, description, profile, created_at"),
     sb
       .from("agents")
       .select("*")
@@ -124,12 +126,33 @@ export async function runAllDue(opts: RunAllOptions): Promise<SchedulerSummary> 
 
       // 2) Execute the runner. One try/catch per runner so a thrown error in
       //    one runner never bleeds into the other runners for this company.
+      //    We pass the agent_key → run_id map so LLM-driven runners can write
+      //    per-step trace rows into agent_logs.
+      const runIdsByAgent: Record<string, string> = {};
+      for (const r of openedRuns) runIdsByAgent[r.agent_key] = r.id;
+
       try {
-        const result = await RUNNERS[runnerId]({
-          id: company.id,
-          url: company.url,
-          name: company.name,
-        });
+        const result = await RUNNERS[runnerId](
+          {
+            id: company.id,
+            url: company.url,
+            name: company.name,
+            description: company.description ?? null,
+            profile: company.profile ?? {},
+            created_at: company.created_at ?? "",
+          },
+          runIdsByAgent,
+        );
+
+        // If the runner returned a structured failure but didn't throw, fold
+        // it into the summary so the operator can see why the run was empty.
+        if (result.failure) {
+          summary.failures.push({
+            company: company.name || company.id,
+            agentKey: coveredAgents.map((a) => a.key).join(","),
+            error: result.failure,
+          });
+        }
 
         // 3) Insert proposals (one query).
         let insertedProposals: Array<{ agent_key: string }> = [];

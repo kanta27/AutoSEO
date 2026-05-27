@@ -1,6 +1,8 @@
 // Hand-written row types so we don't depend on `supabase gen types`. Keep in
 // sync with supabase/migrations/0001_init.sql.
 
+export type CompanyPlatform = "shopify" | "wordpress" | "unknown";
+
 export type Company = {
   id: string;
   url: string;
@@ -8,6 +10,8 @@ export type Company = {
   description: string | null;
   profile: Record<string, unknown>;
   created_at: string;
+  platform: CompanyPlatform;             // added by migration 0004
+  platform_meta: Record<string, unknown>; // added by migration 0004
 };
 
 export type DocumentKind =
@@ -35,7 +39,13 @@ export type Agent = {
   schedule_hours: number; // added by migration 0002
 };
 
-export type ProposalStatus = "pending" | "approved" | "rejected" | "archived";
+export type ProposalStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "archived"
+  | "published"
+  | "publish_failed";
 
 export type Proposal = {
   id: string;
@@ -48,6 +58,8 @@ export type Proposal = {
   status: ProposalStatus;
   created_at: string;
   decided_at: string | null;
+  publish_url: string | null;   // added by migration 0003 (set on successful publish)
+  publish_error: string | null; // added by migration 0003 (set on publish_failed)
 };
 
 export type AgentRun = {

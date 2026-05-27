@@ -233,6 +233,152 @@ curl -X POST http://localhost:3001/api/scheduler/run        # → 401 Unauthoriz
 #    Actions Feed should show fresh pending items.
 ```
 
+---
+
+## Blog Agent
+
+The first agent built on the shared agentic-loop skeleton at `lib/agents/`.
+Drafts ranking-targeted articles in your brand voice and drops them in the
+Actions Feed as `pending` `blog_post` proposals. **Nothing publishes without
+your click.**
+
+### Migration
+
+Run `supabase/migrations/0003_blog_agent.sql` once. It adds the `blog` row to
+the agent catalog (weekly cadence — `schedule_hours=168`), extends the
+proposal status enum to include `published` / `publish_failed`, adds
+`publish_url` + `publish_error` columns, and creates `agent_logs` (per-step
+agentic-loop trace, scoped to a single `agent_runs` row).
+
+### How the loop works
+
+The Blog agent uses the shared runner in `lib/agents/runner.ts` — a generic
+Gemini tool-calling loop that exposes a typed `tools/` registry to the LLM.
+For each tool call the runner logs a row to `agent_logs` so you can read back
+*why* the agent picked the topic it did. Step budget: 6.
+
+Tools the Blog agent gets:
+
+| Tool | Purpose |
+|---|---|
+| `get_company_context` | Reads the company + brand_voice + product_info documents. |
+| `get_keyword_gaps` | Mines existing SEO/GEO audit proposals for topics worth writing about. Empty when no audit data exists — the agent then brainstorms from the company context. |
+| `web_search` | Optional Tavily-backed search. Returns `{ available: false }` when `TAVILY_API_KEY` is unset, and the agent proceeds without external research. |
+| `seo_self_check` | Deterministic checklist (keyword in title/H1/first 100 words, meta 140-160c, ≥3 H2s, 800-1500 words). |
+| `submit_article` | Terminal — calling it ends the loop and the runner shapes the deliverable into a `blog_post` proposal. |
+
+### Multi-platform publishing (Shopify + WordPress + manual)
+
+The approval handler dispatches a `blog_post` approval to the right connector
+by the company's detected `platform`:
+
+| `companies.platform` | Connector | What happens on Approve |
+|---|---|---|
+| `shopify` | `lib/connectors/cms.ts` → Shopify Admin REST API 2026-01 | Article published live, `status='published'`, `publish_url` set |
+| `wordpress` | `lib/connectors/wordpress.ts` → WP REST API + Application Passwords | Post published live, same status/URL fields |
+| `unknown` | none — **manual mode** | `status='approved'` with no `publish_url`. UI shows "Copy markdown" + "Copy HTML" |
+
+Adding a Webflow/Ghost connector later = one file + one line in `lib/connectors/index.ts`.
+
+**Platform detection happens at onboarding.** `lib/connectors/detect.ts`:
+
+1. Probes `{origin}/wp-json/` — a 200 + JSON manifest is the definitive WP signal.
+2. Otherwise GETs the homepage and substring-scans for Shopify markers
+   (`cdn.shopify.com`, `.myshopify.com`, `Shopify.shop`, `window.Shopify`),
+   plus a fallback HTML-markers check for WP (`wp-content`, `wp-includes`,
+   `<meta generator="WordPress …">`).
+3. Otherwise `'unknown'`.
+
+5-second budget across both probes. Any failure → `'unknown'`, never blocks
+onboarding. Detection hints land in `companies.platform_meta` for debugging.
+
+**Connector endpoints (verified against current docs):**
+
+```
+Shopify    POST /admin/api/2026-01/blogs/{blog_id}/articles.json
+           Header  X-Shopify-Access-Token: <token>
+           Body    { article: { title, body_html, ... } }
+
+WordPress  POST {site}/wp-json/wp/v2/posts
+           Header  Authorization: Basic base64(username:app_password)
+           Body    { title, content, status: "publish", slug, excerpt }
+```
+
+Both throw the same shared error types (`CmsNotConfiguredError`,
+`CmsPublishError`) so the approval handler catches once.
+
+On Shopify success/failure the proposal moves to `published` / `publish_failed`
+with `publish_error` populated; the dashboard surfaces a **Retry publish**
+button that re-POSTs the same approval (useful after fixing env vars).
+
+The blog agent never calls these connectors directly — only the approval
+handler does. **One enforcement point for the human gate.**
+
+### Env
+
+Add to `.env.local`:
+
+```env
+# Shopify
+SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
+SHOPIFY_ADMIN_TOKEN=shpat_…
+SHOPIFY_BLOG_ID=                # optional
+
+# WordPress (Users → Edit User → Application Passwords)
+WORDPRESS_SITE_URL=https://example.com
+WORDPRESS_USERNAME=
+WORDPRESS_APP_PASSWORD=
+
+# Optional — better freshness in blog drafts if set
+TAVILY_API_KEY=
+```
+
+> **Multi-tenant note:** for now both connectors read from process env, so the
+> running instance publishes to one Shopify store + one WordPress site at
+> most. The proper multi-tenant version stores credentials per company —
+> `getPublisher` will read from the company row instead. That's a separate
+> session; the platform column already exists for it.
+
+### Test it end-to-end
+
+```powershell
+# 1. Run the 0003 migration in Supabase SQL editor.
+# 2. Restart `npm run dev`.
+
+# 3. Trigger the blog agent. Two ways:
+#    a) Wait for the scheduler (weekly), OR
+#    b) Click "Run all agents now" in the dashboard header — bypasses dueness.
+
+# 4. A `blog_post` proposal appears in the Actions Feed under "Blog Agent".
+#    Click "Preview draft ▾" — title, slug, meta, body excerpt, self-check
+#    metrics, internal-link suggestions.
+
+# 5. Approve. Outcome depends on the company's detected platform:
+#    platform=shopify, creds set    → status='published', "View live →" link
+#    platform=shopify, no creds     → status='publish_failed', clear banner + "Retry publish"
+#    platform=wordpress, creds set  → status='published', "View live →" link
+#    platform=wordpress, no creds   → status='publish_failed' + "Retry publish"
+#    platform=unknown               → status='approved', "Copy markdown" / "Copy HTML" buttons
+#                                     (no publish call — user pastes into their site)
+
+# 6. Inspect the agent's reasoning in Supabase:
+#    select role, step, content -> 'name' as tool, created_at
+#      from agent_logs
+#     where run_id = '<the run id from the Activity section>'
+#     order by step;
+```
+
+### What ISN'T this session (per master plan)
+
+- LinkedIn / SEO-fix / GEO-fix / Competitor agents — separate sessions on
+  the same skeleton.
+- Generic-webhook / Webflow / WordPress CMS — Shopify only here.
+- Internal-link injection at publish time (currently surfaced as a
+  suggestion list in the proposal payload, but not auto-applied to body_html).
+- Auto-publish without approval — by design, never.
+
+---
+
 ### Deploying for true 24/7 (later session)
 
 Pick one:

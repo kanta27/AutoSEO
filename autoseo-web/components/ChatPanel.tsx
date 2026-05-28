@@ -13,6 +13,7 @@ export function ChatPanel({
   companyId,
   companyName,
   modelLabel,
+  compact = false,
 }: {
   companyId: string;
   companyName: string;
@@ -20,6 +21,10 @@ export function ChatPanel({
   // don't import server-only modules here, and so the label updates on every
   // provider/model swap without code changes.
   modelLabel: string;
+  // Dashboard puts the chat in the bottom-right slot at a smaller footprint
+  // (fixed-height card next to coming-soon agents). Default keeps the old
+  // tall layout for any other call sites.
+  compact?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([
@@ -104,9 +109,13 @@ export function ChatPanel({
   }
 
   return (
-    <section className="panel flex h-[80vh] flex-col">
+    <section
+      className={
+        "panel flex flex-col " + (compact ? "h-[460px]" : "h-[80vh]")
+      }
+    >
       <div className="panel-header">
-        <span>AI CMO</span>
+        <span>AI CMO {compact ? <span className="text-ink-3">(ask anything)</span> : null}</span>
         <span className="font-mono text-[11px] text-ink-3">{modelLabel}</span>
       </div>
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-4">

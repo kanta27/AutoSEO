@@ -19,7 +19,7 @@ import "server-only";
 import { runNodeAudit } from "@/lib/engines/node-audit";
 import { proposalsFromAudit, type NewProposal } from "@/lib/proposals";
 import { runBlogAgent } from "@/lib/agents/blog/agent";
-import { runSeoFixAgent } from "@/lib/agents/seo-fix/agent";
+import { runCodingAgent } from "@/lib/agents/coding/agent";
 import type { Company } from "@/lib/supabase/types";
 
 export type RunnerCompany = Pick<Company, "id" | "url" | "name"> & {
@@ -32,11 +32,18 @@ export type RunnerCompany = Pick<Company, "id" | "url" | "name"> & {
 };
 
 export type RunnerResult = {
+  // Proposals the SCHEDULER should insert. The Coding runner inserts its
+  // own (because each row needs an id back to link the source handoff), so
+  // it returns proposals: [] and reports the count via inlineInsertedCount.
   proposals: NewProposal[];
   // Optional structured failure info — only surfaced when the runner couldn't
   // produce proposals but didn't throw (e.g. the LLM ran out of step budget).
   // The scheduler will fold this into the summary's `failures` array.
   failure?: string;
+  // When the runner inserted its own rows (Coding handoff path), this is the
+  // count to attribute to agent_runs.proposals_created. The scheduler ADDS
+  // this to whatever it inserted itself, so a runner can do both.
+  inlineInsertedCount?: number;
 };
 
 export type Runner = (
@@ -44,7 +51,7 @@ export type Runner = (
   runIds: Record<string, string>,
 ) => Promise<RunnerResult>;
 
-export type RunnerId = "node-audit" | "blog-agent" | "seo-fix-agent";
+export type RunnerId = "node-audit" | "blog-agent" | "coding-handoff-agent";
 
 export const RUNNERS: Record<RunnerId, Runner> = {
   "node-audit": async (company) => {
@@ -55,12 +62,16 @@ export const RUNNERS: Record<RunnerId, Runner> = {
     const result = await runBlogAgent(company as Company, runIds["blog"]);
     return { proposals: result.proposals, failure: result.failure ?? undefined };
   },
-  "seo-fix-agent": async (company, runIds) => {
-    // Reads pending SEO findings from the proposals table and proposes a
-    // code-level fix (PR via GitHub connector on approval). Single-tenant
-    // env-based GitHub creds for now; per-company creds is a future session.
-    const result = await runSeoFixAgent(company as Company, runIds["coding"]);
-    return { proposals: result.proposals, failure: result.failure ?? undefined };
+  "coding-handoff-agent": async (company, runIds) => {
+    // Processes the handed-off queue from blog/SEO/GEO approvals and
+    // synthesizes code_change proposals. Inserts inline because each row
+    // needs its id linked back to the source handoff (see agent.ts).
+    const result = await runCodingAgent(company as Company, runIds["coding"]);
+    return {
+      proposals: [], // Always empty — runner inserted its own.
+      failure: result.failure ?? undefined,
+      inlineInsertedCount: result.synthesized,
+    };
   },
 };
 
@@ -70,5 +81,5 @@ export const RUNNER_BY_AGENT: Record<string, RunnerId> = {
   seo: "node-audit",
   geo: "node-audit",
   blog: "blog-agent",
-  coding: "seo-fix-agent",
+  coding: "coding-handoff-agent",
 };

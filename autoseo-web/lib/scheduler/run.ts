@@ -154,7 +154,10 @@ export async function runAllDue(opts: RunAllOptions): Promise<SchedulerSummary> 
           });
         }
 
-        // 3) Insert proposals (one query).
+        // 3) Insert proposals (one query). Some runners (Coding handoff)
+        //    insert their own rows because they need each id to link back
+        //    to a source handoff; those report the count via
+        //    inlineInsertedCount instead of result.proposals.
         let insertedProposals: Array<{ agent_key: string }> = [];
         if (result.proposals.length) {
           const { data: ins, error: insErr } = await sb
@@ -166,22 +169,30 @@ export async function runAllDue(opts: RunAllOptions): Promise<SchedulerSummary> 
           if (insErr) throw insErr;
           insertedProposals = (ins ?? []) as Array<{ agent_key: string }>;
         }
-        summary.proposalsCreated += insertedProposals.length;
+        const inlineCount = result.inlineInsertedCount ?? 0;
+        summary.proposalsCreated += insertedProposals.length + inlineCount;
 
         // 4) Attribute proposal counts to each covered agent and close out
         //    its run row. Done one update per row — fine at scale we care
         //    about (handful of agents × handful of companies per tick).
+        //    Inline-inserted rows are attributed to the FIRST covered agent
+        //    (they're always one runner = one agent today; the only inline
+        //    runner is coding-handoff-agent which only maps to `coding`).
         const finishedAt = new Date().toISOString();
         for (const run of openedRuns) {
-          const count = insertedProposals.filter(
+          const fromInsert = insertedProposals.filter(
             (p) => p.agent_key === run.agent_key,
           ).length;
+          const fromInline =
+            inlineCount > 0 && coveredAgents[0]?.key === run.agent_key
+              ? inlineCount
+              : 0;
           await sb
             .from("agent_runs")
             .update({
               status: "done",
               finished_at: finishedAt,
-              proposals_created: count,
+              proposals_created: fromInsert + fromInline,
             })
             .eq("id", run.id);
         }

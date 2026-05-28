@@ -59,7 +59,14 @@ export type Proposal = {
   created_at: string;
   decided_at: string | null;
   publish_url: string | null;   // added by migration 0003 (set on successful publish)
-  publish_error: string | null; // added by migration 0003 (set on publish_failed)
+  publish_error: string | null; // added by migration 0003 (set on publish_failed, OR by Coding when a handoff couldn't be synthesized)
+  // ---- migration 0006: handoff to Coding Agent ----
+  // True when this proposal was approved with an implied code change. The
+  // Coding runner reads the not-yet-synthesized queue and produces a
+  // companion `code_change` proposal whose id is stored back in
+  // handoff_synthesized_proposal_id.
+  handed_off_to_coding: boolean;
+  handoff_synthesized_proposal_id: string | null;
 };
 
 // Payload shape for `code_change` proposals — emitted by code-fix agents

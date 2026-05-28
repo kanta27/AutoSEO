@@ -26,11 +26,14 @@ const AGENT_ORDER = [
 ];
 
 export function ActionsFeed({
-  companyId,
+  companyId: _companyId,
   initialProposals,
   agents,
   companyPlatform,
 }: {
+  // Kept in the signature for backwards compat with callers — no longer
+  // used inside the component (the per-agent Run button moved to the
+  // drill-down page header).
   companyId: string;
   initialProposals: Proposal[];
   agents: Agent[];
@@ -41,8 +44,9 @@ export function ActionsFeed({
 }) {
   const [proposals, setProposals] = useState<Proposal[]>(initialProposals);
   const [tab, setTab] = useState<"current" | "archived">("current");
-  const [running, setRunning] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
+  // Transient banner shown after an approval that handed off to Coding. Set
+  // by the decide() handler when the server response carries handed_off=true.
+  const [handoffToast, setHandoffToast] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   const visible = useMemo(
@@ -55,27 +59,6 @@ export function ActionsFeed({
   );
 
   const grouped = useMemo(() => groupByAgent(visible, agents), [visible, agents]);
-
-  async function runSeo() {
-    setRunError(null);
-    setRunning(true);
-    try {
-      const res = await fetch("/api/agents/seo/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ companyId }),
-      });
-      const j = (await res.json()) as { proposals?: Proposal[]; error?: string };
-      if (!res.ok) throw new Error(j.error || `Run failed (${res.status})`);
-      if (j.proposals?.length) {
-        setProposals((cur) => [...j.proposals!, ...cur]);
-      }
-    } catch (err) {
-      setRunError(err instanceof Error ? err.message : "Run failed");
-    } finally {
-      setRunning(false);
-    }
-  }
 
   async function decide(id: string, decision: "approved" | "rejected") {
     const prev = proposals.find((p) => p.id === id);
@@ -101,9 +84,18 @@ export function ActionsFeed({
       const j = (await res.json().catch(() => ({}))) as {
         proposal?: Proposal;
         error?: string;
+        handed_off?: boolean;
       };
       if (j.proposal) {
         setProposals((cur) => cur.map((p) => (p.id === id ? j.proposal! : p)));
+        if (j.handed_off) {
+          // Tiny inline notice — clears after a few seconds. The user will
+          // see the Coding card's count increase when they navigate back.
+          setHandoffToast(
+            "Sent to Coding Agent. Process it from the Coding tab.",
+          );
+          setTimeout(() => setHandoffToast(null), 4000);
+        }
       } else if (!res.ok) {
         // Roll back optimistic reject.
         setProposals((cur) => cur.map((p) => (p.id === id ? prev : p)));
@@ -132,17 +124,15 @@ export function ActionsFeed({
         </div>
       </div>
 
-      <div className="border-b border-line p-4">
-        <button
-          type="button"
-          onClick={runSeo}
-          disabled={running}
-          className="btn btn-primary w-full disabled:opacity-50"
+      {handoffToast && (
+        <div
+          className="border-b border-line bg-card-2 px-4 py-2 text-[12px] text-ink-2"
+          role="status"
+          aria-live="polite"
         >
-          {running ? "Running SEO + GEO…" : "Run SEO + GEO audit"}
-        </button>
-        {runError && <p className="mt-2 text-[12px] text-warn">{runError}</p>}
-      </div>
+          {handoffToast}
+        </div>
+      )}
 
       <div className="max-h-[60vh] overflow-y-auto p-4">
         {visible.length === 0 ? (

@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
 import { runBlogAgent } from "@/lib/agents/blog/agent";
+import { filterNewProposals } from "@/lib/proposals";
 import type { Company, Proposal } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
@@ -47,13 +48,21 @@ export async function POST(req: Request) {
 
   try {
     const result = await runBlogAgent(company as Company, runId);
+    // Dedup before insert. A second blog-agent run for the same company may
+    // produce a similarly-titled draft (the agent picks a keyword gap that's
+    // still gap-shaped); skip if a draft with the same title is already in
+    // the user's queue or has been published.
+    const { newRows, dupedCount } = await filterNewProposals(
+      sb,
+      companyId,
+      result.proposals,
+    );
+
     let inserted: Proposal[] = [];
-    if (result.proposals.length) {
+    if (newRows.length) {
       const { data, error } = await sb
         .from("proposals")
-        .insert(
-          result.proposals.map((p) => ({ ...p, company_id: companyId })),
-        )
+        .insert(newRows.map((p) => ({ ...p, company_id: companyId })))
         .select("*");
       if (error) throw error;
       inserted = (data ?? []) as Proposal[];
@@ -77,6 +86,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       runId,
       proposals: inserted,
+      proposals_total: result.proposals.length,
+      proposals_new: inserted.length,
+      proposals_deduped: dupedCount,
       failure: result.failure ?? null,
     });
   } catch (err) {

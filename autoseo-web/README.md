@@ -398,6 +398,36 @@ contract. Picking + wiring one is a separate session.
 
 ---
 
+## Skills (vendored marketing frameworks)
+
+The Blog Agent and the Coding Agent's SEO/GEO synthesis path append a curated
+set of marketing-skills markdown files to their system prompts at runtime.
+The skills are vendored at the repo root in `../skills/` (MIT-licensed, from
+[coreyhaines31/marketingskills](https://github.com/coreyhaines31/marketingskills)).
+See `../skills/README.md` for the full attribution and update protocol.
+
+Which agent loads which skills:
+
+| Agent                      | Skills loaded                                                     |
+|----------------------------|-------------------------------------------------------------------|
+| Blog Agent                 | `copywriting`, `content-strategy`, `seo-audit`, `ai-seo`          |
+| Coding Agent (SEO/GEO LLM) | `seo-audit`, `ai-seo`, `schema`, `site-architecture`              |
+| Coding Agent (blog handoff)| _none_ (deterministic markdown PR, no system prompt to enrich)    |
+
+Skills are CONTEXT, not rules — the agent's explicit operational prompt
+(brand voice, step order, hard rules) remains primary. The skill block is
+appended under a `## Reference frameworks` heading.
+
+**Cost.** Loaded skills add ~10–12k tokens of system prompt per agent run.
+`lib/agents/skills.ts` caps any single skill body at ~12,000 characters
+(truncates at a heading boundary) and caches reads at the module level so
+each skill is loaded from disk at most once per Node process.
+
+**Toggle.** Set `SKILLS_ENABLED=false` in `.env.local` to disable. Useful for
+A/B comparing output quality with vs. without the framework context.
+
+---
+
 ## Type-check
 
 ```powershell

@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
 import { runNodeAudit, EngineUnavailableError } from "@/lib/engines/node-audit";
-import { proposalsFromAudit } from "@/lib/proposals";
+import { filterNewProposals, proposalsFromAudit } from "@/lib/proposals";
 import type { Proposal } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
@@ -48,16 +48,18 @@ export async function POST(req: Request) {
 
   try {
     const report = await runNodeAudit(company.url, { withFixes: true });
-    const newProps = proposalsFromAudit(report).map((p) => ({
-      ...p,
-      company_id: companyId,
-    }));
+    const allProps = proposalsFromAudit(report);
+    // Dedup against findings the user has already seen / is acting on / has
+    // shipped. The second SEO run on an unchanged site should not double the
+    // queue — that's exactly what made the feed look broken before.
+    const { newRows, dupedCount } = await filterNewProposals(sb, companyId, allProps);
+    const withCompany = newRows.map((p) => ({ ...p, company_id: companyId }));
 
     let inserted: Proposal[] = [];
-    if (newProps.length) {
+    if (withCompany.length) {
       const { data, error } = await sb
         .from("proposals")
-        .insert(newProps)
+        .insert(withCompany)
         .select("*");
       if (error) throw error;
       inserted = (data ?? []) as Proposal[];
@@ -70,7 +72,13 @@ export async function POST(req: Request) {
         .eq("id", runId);
     }
 
-    return NextResponse.json({ runId, proposals: inserted });
+    return NextResponse.json({
+      runId,
+      proposals: inserted,
+      proposals_total: allProps.length,
+      proposals_new: inserted.length,
+      proposals_deduped: dupedCount,
+    });
   } catch (err) {
     const msg =
       err instanceof EngineUnavailableError

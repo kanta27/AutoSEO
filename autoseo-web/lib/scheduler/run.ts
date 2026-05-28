@@ -10,6 +10,7 @@
 import "server-only";
 
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
+import { filterNewProposals } from "@/lib/proposals";
 import type { Agent } from "@/lib/supabase/types";
 import { RUNNERS, RUNNER_BY_AGENT, type RunnerId } from "./runners";
 
@@ -158,16 +159,25 @@ export async function runAllDue(opts: RunAllOptions): Promise<SchedulerSummary> 
         //    insert their own rows because they need each id to link back
         //    to a source handoff; those report the count via
         //    inlineInsertedCount instead of result.proposals.
+        //
+        //    Before insert, dedup against findings the user has already seen
+        //    or acted on (across runs) — the second tick of the day should
+        //    not double the queue if nothing changed on the customer's site.
         let insertedProposals: Array<{ agent_key: string }> = [];
         if (result.proposals.length) {
-          const { data: ins, error: insErr } = await sb
-            .from("proposals")
-            .insert(
-              result.proposals.map((p) => ({ ...p, company_id: company.id })),
-            )
-            .select("agent_key");
-          if (insErr) throw insErr;
-          insertedProposals = (ins ?? []) as Array<{ agent_key: string }>;
+          const { newRows } = await filterNewProposals(
+            sb,
+            company.id,
+            result.proposals,
+          );
+          if (newRows.length) {
+            const { data: ins, error: insErr } = await sb
+              .from("proposals")
+              .insert(newRows.map((p) => ({ ...p, company_id: company.id })))
+              .select("agent_key");
+            if (insErr) throw insErr;
+            insertedProposals = (ins ?? []) as Array<{ agent_key: string }>;
+          }
         }
         const inlineCount = result.inlineInsertedCount ?? 0;
         summary.proposalsCreated += insertedProposals.length + inlineCount;

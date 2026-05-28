@@ -65,18 +65,20 @@ export function CodingHandoffQueue({
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="chip font-mono !text-[10px]">{h.agent_key}</span>
-                  <span className="font-mono text-[11px] text-ink-3">
-                    {sourceTypeLabel(h.type)}
-                  </span>
-                </div>
                 <div className="text-[13px] font-medium text-ink">{h.title}</div>
                 {h.summary && (
                   <p className="mt-1 text-[12px] leading-[1.45] text-ink-3">
                     {h.summary}
                   </p>
                 )}
+                {/* Source breadcrumb — instantly tells the reviewer which
+                    SEO/GEO/Blog finding this synthesis is for, without having
+                    to dig into the payload. Data comes from the proposal row
+                    itself (agent_key + title) — no extra queries. */}
+                <p className="mt-2 text-[11px] text-ink-3">
+                  Source: {sourceAgentLabel(h.agent_key)} · {sourceTypeLabel(h.type)} — &ldquo;
+                  {truncate(h.title, 80)}&rdquo;
+                </p>
                 {h.publish_error && (
                   <p className="mt-2 break-words rounded border border-line bg-card p-2 text-[12px] text-warn">
                     Couldn&apos;t synthesize: {h.publish_error}
@@ -104,17 +106,36 @@ export function CodingHandoffQueue({
   );
 }
 
+function sourceAgentLabel(agentKey: string): string {
+  switch (agentKey) {
+    case "seo":
+      return "SEO Agent";
+    case "geo":
+      return "GEO Agent";
+    case "blog":
+      return "Blog Agent";
+    case "coding":
+      return "Coding Agent";
+    default:
+      return agentKey;
+  }
+}
+
 function sourceTypeLabel(type: string): string {
   switch (type) {
     case "issue_critical":
-      return "SEO · critical";
+      return "critical finding";
     case "issue_high":
-      return "SEO · high";
+      return "high-priority finding";
     case "geo_gap":
-      return "GEO · citable gap";
+      return "citable gap";
     case "blog_post":
-      return "Blog · draft";
+      return "blog draft";
     default:
       return type;
   }
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }

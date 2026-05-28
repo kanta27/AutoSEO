@@ -12,7 +12,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
-import { ActionsFeed } from "@/components/ActionsFeed";
+import { ActionsFeed, type CodeChangeLookup } from "@/components/ActionsFeed";
 import { AgentRunButton } from "@/components/AgentRunButton";
 import { CodingHandoffQueue } from "@/components/CodingHandoffQueue";
 import type {
@@ -20,6 +20,7 @@ import type {
   AgentRun,
   Company,
   Proposal,
+  ProposalStatus,
 } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +87,12 @@ export default async function AgentDrilldownPage({
   let codingHandoffs: Proposal[] = [];
   let codingProposals: Proposal[] = [];
   let normalProposals: Proposal[] = [];
+  // For SEO/GEO/Blog rows that handed off to Coding, the user wants to see
+  // whether the downstream PR has shipped. We pull the linked code_change's
+  // status + publish_url so ActionsFeed can bucket those rows correctly
+  // (Complete when the PR is open, Pending otherwise) and render the right
+  // inline pill ("PR opened — View PR →" vs "Code change drafted →").
+  const codeChangeLookup: CodeChangeLookup = new Map();
 
   if (isCoding) {
     const [handoffsRes, codeRes] = await Promise.all([
@@ -115,6 +122,28 @@ export default async function AgentDrilldownPage({
       .order("created_at", { ascending: false })
       .limit(200);
     normalProposals = (rows ?? []) as Proposal[];
+
+    // Second query — bounded by the set of synthesized ids on this agent's
+    // rows. Skip the round-trip if no handoffs have been synthesized yet.
+    const synthIds = normalProposals
+      .map((p) => p.handoff_synthesized_proposal_id)
+      .filter((id): id is string => Boolean(id));
+    if (synthIds.length) {
+      const { data: linkedRows } = await sb
+        .from("proposals")
+        .select("id, status, publish_url")
+        .in("id", synthIds);
+      for (const r of (linkedRows ?? []) as Array<{
+        id: string;
+        status: ProposalStatus;
+        publish_url: string | null;
+      }>) {
+        codeChangeLookup.set(r.id, {
+          status: r.status,
+          publish_url: r.publish_url,
+        });
+      }
+    }
   }
 
   return (
@@ -153,6 +182,9 @@ export default async function AgentDrilldownPage({
 
         {isCoding ? (
           <>
+            {/* Coding's first section is its own thing — the queue of
+                handed-off rows from other agents awaiting synthesis. The
+                three-feed ActionsFeed below it owns the code_change rows. */}
             <section className="panel">
               <div className="panel-header">
                 <span>Pending fix synthesis</span>
@@ -163,34 +195,24 @@ export default async function AgentDrilldownPage({
               <CodingHandoffQueue handoffs={codingHandoffs} />
             </section>
 
-            <section className="panel">
-              <div className="panel-header">
-                <span>PRs ready to open</span>
-              </div>
-              <div className="p-5">
-                <ActionsFeed
-                  companyId={co.id}
-                  initialProposals={codingProposals}
-                  agents={agents}
-                  companyPlatform={co.platform}
-                />
-              </div>
-            </section>
+            {/* ActionsFeed renders its own Action / Pending / Complete panels
+                so no extra panel wrapper here. */}
+            <ActionsFeed
+              companyId={co.id}
+              initialProposals={codingProposals}
+              agents={agents}
+              companyPlatform={co.platform}
+              codeChangeLookup={codeChangeLookup}
+            />
           </>
         ) : (
-          <section className="panel">
-            <div className="panel-header">
-              <span>Queue</span>
-            </div>
-            <div className="p-5">
-              <ActionsFeed
-                companyId={co.id}
-                initialProposals={normalProposals}
-                agents={agents}
-                companyPlatform={co.platform}
-              />
-            </div>
-          </section>
+          <ActionsFeed
+            companyId={co.id}
+            initialProposals={normalProposals}
+            agents={agents}
+            companyPlatform={co.platform}
+            codeChangeLookup={codeChangeLookup}
+          />
         )}
 
         <section className="panel">

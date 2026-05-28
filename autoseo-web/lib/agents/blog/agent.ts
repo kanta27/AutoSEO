@@ -15,6 +15,7 @@
 import "server-only";
 
 import { runAgent } from "../runner";
+import { loadSkills } from "../skills";
 import {
   getCompanyContextTool,
   getKeywordGapsTool,
@@ -27,6 +28,11 @@ import {
 } from "./tools";
 import type { Company } from "@/lib/supabase/types";
 import type { NewProposal } from "@/lib/proposals";
+
+// Vendored marketing skills (frameworks, not rules) appended to the system
+// prompt. See skills/README.md for the rationale. Toggle off with
+// SKILLS_ENABLED=false in .env.local.
+const BLOG_SKILLS = ["copywriting", "content-strategy", "seo-audit", "ai-seo"];
 
 const SYSTEM_PROMPT = `You are the Blog Agent for AutoSEO, an autonomous SEO platform.
 Your job: draft ONE publish-ready article that helps this company rank for a
@@ -79,11 +85,20 @@ export async function runBlogAgent(
 ): Promise<BlogAgentResult> {
   const { tool: submitTool, read: readSubmitted } = createSubmitArticleTool();
 
+  // Skill content is appended AFTER the existing system prompt so the
+  // operational instructions (brand voice, structure rules, step order)
+  // remain primary. The skill block is wrapped in "## Reference frameworks"
+  // — it informs reasoning but doesn't override the explicit rules above.
+  const skillsBlock = loadSkills(BLOG_SKILLS);
+  const systemPrompt = skillsBlock
+    ? `${SYSTEM_PROMPT}\n\n${skillsBlock}`
+    : SYSTEM_PROMPT;
+
   const result = await runAgent({
     agentKey: "blog",
     company,
     runId,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt,
     tools: [
       getCompanyContextTool,
       getKeywordGapsTool,

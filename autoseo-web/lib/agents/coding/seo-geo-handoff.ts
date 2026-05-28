@@ -10,6 +10,7 @@
 import "server-only";
 
 import { runAgent } from "../runner";
+import { loadSkills } from "../skills";
 import { getCompanyContextTool } from "../tools/common";
 import {
   findFileInRepoTool,
@@ -19,6 +20,14 @@ import {
 } from "@/lib/agents/seo-fix/tools";
 import type { Company, Proposal } from "@/lib/supabase/types";
 import type { NewProposal } from "@/lib/proposals";
+
+// Vendored marketing skills for the Coding agent's LLM synthesis paths. These
+// give the agent frameworks for reasoning about what a good SEO/GEO fix is at
+// the file level. See skills/README.md. Toggle off with SKILLS_ENABLED=false.
+//
+// Note: the deterministic blog-handoff path doesn't load skills — there's no
+// LLM call to enrich.
+const CODING_SKILLS = ["seo-audit", "ai-seo", "schema", "site-architecture"];
 
 export type LlmHandoffOutcome =
   | { ok: true; proposal: NewProposal }
@@ -79,11 +88,17 @@ async function runHandoffAgent(
 ): Promise<LlmHandoffOutcome> {
   const { submitCodeChange, submitUnfixable, read } = createSubmitTools();
 
+  // Skills appended AFTER the per-handoff operational prompt — the explicit
+  // step order and hard rules above remain primary; skills add framework
+  // context (what good schema looks like, AI-citability heuristics, etc.).
+  const skillsBlock = loadSkills(CODING_SKILLS);
+  const fullPrompt = skillsBlock ? `${systemPrompt}\n\n${skillsBlock}` : systemPrompt;
+
   const result = await runAgent({
     agentKey: "coding",
     company,
     runId,
-    systemPrompt,
+    systemPrompt: fullPrompt,
     tools: [
       getCompanyContextTool,
       findFileInRepoTool,

@@ -79,6 +79,9 @@ export function AgentRunButton({
       });
       const j = (await res.json().catch(() => ({}))) as {
         proposals?: unknown[];
+        proposals_total?: number;
+        proposals_new?: number;
+        proposals_deduped?: number;
         synthesized?: number;
         processed?: number;
         failure?: string | null;
@@ -90,6 +93,15 @@ export function AgentRunButton({
       const parts: string[] = [];
       if (typeof j.synthesized === "number") {
         parts.push(`${j.synthesized}/${j.processed ?? 0} synthesized`);
+      } else if (typeof j.proposals_total === "number") {
+        // SEO/GEO/Blog: show total found + new + already-known split so the
+        // user understands why the queue didn't grow on a re-run.
+        const total = j.proposals_total;
+        const fresh = j.proposals_new ?? (j.proposals?.length ?? 0);
+        const known = j.proposals_deduped ?? Math.max(0, total - fresh);
+        parts.push(`${total} finding${total === 1 ? "" : "s"}`);
+        parts.push(`${fresh} new`);
+        if (known > 0) parts.push(`${known} already known`);
       } else if (Array.isArray(j.proposals)) {
         parts.push(`${j.proposals.length} proposal${j.proposals.length === 1 ? "" : "s"}`);
       }

@@ -47,10 +47,20 @@ export type CompanyDocument = {
   created_at: string;
   // ---- migration 0009 ----
   // Free-form metadata. Onboarding stamps { is_starter: true } on seeded
-  // docs so the Company panel can render a "New" badge until the user
-  // edits the doc (when edit lands; v1 just shows the badge unconditionally
-  // while is_starter remains true).
+  // docs; kept for telemetry / future "Reset to starter" action. The
+  // Company panel's "New" badge no longer reads this — see viewed_at below.
   meta: Record<string, unknown>;
+  // ---- migration 0010 ----
+  // First-view timestamp. NULL until the viewer page loads the row, then
+  // set once and never updated. Drives the "New" pill.
+  viewed_at: string | null;
+  // True once the user saves any edit through PUT /api/documents/:id.
+  // Drives the "Edited" pill (and tells agents they're consuming
+  // customer-tuned content, useful for future telemetry).
+  user_edited: boolean;
+  // Last-modified timestamp. Bumped on every successful PUT. Defaults to
+  // the row's created_at on pre-0010 rows that the migration backfilled.
+  updated_at: string;
 };
 
 export type Agent = {

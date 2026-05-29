@@ -9,8 +9,11 @@
 //                  "Improve writing quality") — link out to the doc that
 //                  fixes the gap. Visual placeholders until the edit flow lands.
 //   Body:          Description paragraph from companies.description.
-//   DOCUMENTS:     The 5 starter docs (+ a placeholder Articles folder).
-//                  Docs with meta.is_starter=true get a "New" pill.
+//   DOCUMENTS:     The 5 starter docs. Each row is a Link to the viewer at
+//                  /dashboard/documents/[id]. "New" pill renders while
+//                  viewed_at is null; "edited" pill renders once user_edited
+//                  flips. (The Articles placeholder folder was removed —
+//                  it's a future feature, no point shipping dead UI.)
 //   COMPETITORS:   2-col grid of small logos + hostnames. Pencil button →
 //                  EditCompetitorsButton modal.
 import Link from "next/link";
@@ -114,17 +117,10 @@ export function CompanyPanel({
                 <DocRow key={d.id} doc={d} />
               ))
             )}
-            {/* Articles is a placeholder folder for a future content library
-                — visual only, no link target. */}
-            <li
-              className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-[13px] text-ink-3"
-              aria-disabled
-            >
-              <span className="flex items-center gap-2">
-                <FolderIcon /> Articles
-              </span>
-              <span className="font-mono text-[11px]">—</span>
-            </li>
+            {/* The "Articles" placeholder folder lived here in Session 2.
+                Removed in the document-viewer session — it had no target and
+                no real underlying feature. A proper content library is a
+                future session. */}
           </ul>
         </div>
 
@@ -155,19 +151,30 @@ export function CompanyPanel({
 
 function DocRow({ doc }: { doc: CompanyDocument }) {
   const label = KIND_LABEL[doc.kind] ?? doc.title;
-  // `meta` is `not null default '{}'` post-migration, but rows created
-  // before 0009 ran will be null — read defensively.
-  const meta = (doc.meta ?? {}) as { is_starter?: boolean };
-  const isStarter = Boolean(meta.is_starter);
+  // "Edited" wins over "New": if the user has saved an edit, they've
+  // self-evidently viewed the doc too, so the New pill would be redundant.
+  // Pre-0010 rows have viewed_at/user_edited undefined — treat undefined as
+  // "never viewed / never edited" to match the post-migration semantics.
+  const userEdited = Boolean(doc.user_edited);
+  const isNew = !userEdited && !doc.viewed_at;
   return (
-    <li className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-[13px] hover:bg-card-2">
-      <span className="flex items-center gap-2">
-        <FileIcon /> {label}
-      </span>
-      <div className="flex items-center gap-2">
-        {isStarter ? <span className="chip chip-soon text-[10px]">New</span> : null}
-        <span className="text-[11px] text-ink-3">›</span>
-      </div>
+    <li>
+      <Link
+        href={`/dashboard/documents/${doc.id}`}
+        className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-[13px] hover:bg-card-2"
+      >
+        <span className="flex items-center gap-2">
+          <FileIcon /> {label}
+        </span>
+        <div className="flex items-center gap-2">
+          {userEdited ? (
+            <span className="chip chip-soon text-[10px]">edited</span>
+          ) : isNew ? (
+            <span className="chip chip-soon text-[10px]">New</span>
+          ) : null}
+          <span className="text-[11px] text-ink-3">›</span>
+        </div>
+      </Link>
     </li>
   );
 }
@@ -250,21 +257,3 @@ function FileIcon() {
   );
 }
 
-function FolderIcon() {
-  return (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="text-ink-3"
-      aria-hidden
-    >
-      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-    </svg>
-  );
-}

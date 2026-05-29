@@ -470,6 +470,81 @@ contract. Picking + wiring one is a separate session.
 
 ---
 
+## Documents
+
+The five starter documents seeded at onboarding are real artefacts the agents
+read at run time — not just decoration. Clicking any row in the Company
+panel's **Documents** list opens a viewer at `/dashboard/documents/[id]`
+with a rendered-markdown body and an Edit pencil.
+
+### What each kind is for (and who reads it)
+
+| Kind                  | Edited copy steers…                                                                                                                  |
+|-----------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `brand_voice`         | The Blog Agent's drafts and the AI CMO chat's tone.                                                                                  |
+| `product_info`        | The Blog and SEO agents when they describe what you sell.                                                                            |
+| `competitor_analysis` | The Blog Agent's topic-pick step (avoid duplicating what competitors covered; deepen where they're shallow).                         |
+| `marketing_strategy`  | The AI CMO chat's strategic answers ("what should I ship first?").                                                                   |
+| `llms_txt`            | The static `llms.txt` file you can publish at `/llms.txt` so AI engines (ChatGPT, Perplexity, AI Overviews) can summarise your site. |
+
+All five are read by `get_company_context` (the tool every runner-loop agent
+calls first) — see `lib/agents/tools/common.ts`. **Editing a doc steers the
+next agent run.** Save in the viewer → the next Blog / SEO / Coding run
+reads the updated body and adapts. No re-deploy, no agent restart.
+
+### Migration
+
+Run `supabase/migrations/0010_documents_viewed_at.sql` once. It adds three
+columns to `documents`:
+
+- `viewed_at timestamptz` — first-view stamp; drives the "New" pill in the
+  Company panel. Set once and never updated.
+- `user_edited boolean not null default false` — flipped true on first
+  successful PUT; drives the "edited" pill.
+- `updated_at timestamptz not null default now()` — last-modified stamp;
+  bumped by every PUT.
+
+Safe to re-run.
+
+### Viewer / editor
+
+- **View mode** renders the markdown body with `react-markdown` configured to
+  its safe defaults (`skipHtml`; no raw HTML passthrough, no script
+  execution).
+- **Edit mode** swaps in a full-width monospace textarea with the raw
+  markdown source. Save sends `PUT /api/documents/:id`; on success the page
+  switches back to view, flashes a toast ("Saved. The next agent run will use
+  this."), and calls `router.refresh()` so the Company panel's "edited" pill
+  appears the moment the user navigates back.
+- **Cancel** discards the in-memory draft; no DB write.
+
+### Cap
+
+Bodies over **50,000 characters** are rejected by both the client (with a
+red over-cap counter) and the server (`413` with a friendly message). Edit
+or split the doc if you genuinely need more.
+
+### API
+
+| Verb | Route                  | Behaviour                                                                                  |
+|------|------------------------|--------------------------------------------------------------------------------------------|
+| GET  | `/api/documents/:id`   | Returns the row. Stamps `viewed_at = now()` on first read (no-op on subsequent reads).     |
+| PUT  | `/api/documents/:id`   | `{ body: string }`. Updates `body`, sets `user_edited = true`, bumps `updated_at`. 50k cap.|
+
+Same secrecy posture as `/api/proposals/:id` — service-role server-side, no
+public auth on the routes themselves yet.
+
+### Out of scope this session
+
+- Version history / undo.
+- Multi-user edit collisions (we're single-user).
+- A "Reset to starter content" ⋯-menu action (would just re-run the
+  onboarding LLM step for that single kind — easy to wire later).
+- Creating documents from scratch (only the five onboarding-seeded kinds
+  exist for now).
+
+---
+
 ## Auto-detected competitors
 
 The Company panel (top-left of the dashboard) hosts a 2-column grid of

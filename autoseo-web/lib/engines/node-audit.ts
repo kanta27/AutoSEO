@@ -9,11 +9,17 @@
 // independently later.
 import "server-only";
 
+// The Node engine emits findings at every severity tier including "good"
+// (wins): see `autoseo-app/src/auditors/geo.js`'s `geo-tldr-ok` etc. The
+// type previously claimed only the four-tier bad ladder, which was a lie
+// that downstream consumers tripped over (e.g. proposals.ts had to cast
+// to drop "good"). Widening the union here is honest and lets each
+// consumer pick its own severity policy without casts.
 export type AuditIssue = {
   id?: string;
   agent?: string;
   category?: string;
-  severity: "critical" | "high" | "medium" | "low";
+  severity: "critical" | "high" | "medium" | "low" | "good";
   severityLabel?: string;
   title: string;
   detail?: string;

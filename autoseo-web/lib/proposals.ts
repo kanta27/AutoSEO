@@ -13,6 +13,16 @@ export type NewProposal = {
 };
 
 const HIGH_SEVERITIES = new Set(["critical", "high"]);
+// GEO findings are sometimes medium / low (the geo auditor's stats, q&a,
+// structure, author, date checks are all "low"). The HIGH_SEVERITIES filter
+// silently dropped them, leaving the GEO drilldown empty. For GEO we keep
+// everything except positive wins ("good") so the user sees the whole picture.
+const GEO_INCLUDED_SEVERITIES = new Set<string>([
+  "critical",
+  "high",
+  "medium",
+  "low",
+]);
 
 // ---------------------------------------------------------------------------
 // Dedup helpers (Session A — three-feed UI cleanup).
@@ -120,6 +130,46 @@ export function proposalsFromAudit(report: AuditReport): NewProposal[] {
   }
 
   for (const issue of report.issues ?? []) {
+    // Branch 1 — GEO findings become `geo_gap` proposals.
+    //
+    // They were previously dropped here entirely: HIGH_SEVERITIES only let
+    // critical/high through, and the Node engine's GEO auditor emits at
+    // medium/low almost exclusively, so the GEO drilldown stayed empty.
+    //
+    // We:
+    //   • include every severity except "good" (wins don't belong in the queue)
+    //   • emit type=geo_gap so the approval handler dispatches the row to
+    //     Coding's `synthesizeGeoHandoff` path
+    //   • shape payload.gap = { topic, gap_type, suggested_addition } to match
+    //     what buildGeoSystemPrompt and getKeywordGapsTool already read
+    //   • prefix the title with "GEO: " to keep it distinct from the future
+    //     Python-swarm `Citable gap: …` rows the next block reserves
+    if (issue.category === "geo") {
+      if (!GEO_INCLUDED_SEVERITIES.has(issue.severity)) continue;
+      const fix = issue.id ? fixesByFinding.get(issue.id) : undefined;
+      out.push({
+        agent_key: "geo",
+        type: "geo_gap",
+        title: `GEO: ${issue.title}`,
+        summary: issue.detail || issue.evidence || null,
+        payload: {
+          gap: {
+            topic: issue.title,
+            gap_type: issue.id ?? "geo-finding",
+            suggested_addition:
+              issue.solver?.hint ||
+              issue.detail ||
+              issue.evidence ||
+              "Improve this page's AI-citability per the GEO finding above.",
+          },
+          issue,
+          suggestedFix: fix ?? null,
+        },
+      });
+      continue;
+    }
+    // Branch 2 — non-GEO categories keep the original behaviour: only
+    // critical/high get a row, attributed under SEO via classifyAgent.
     if (!HIGH_SEVERITIES.has(issue.severity)) continue;
     const fix = issue.id ? fixesByFinding.get(issue.id) : undefined;
     out.push({
@@ -131,9 +181,13 @@ export function proposalsFromAudit(report: AuditReport): NewProposal[] {
     });
   }
 
-  // 3. GEO citable gaps. The Node engine's `geo` auditor populates findings;
-  //    if a richer Python-swarm geo block is merged in later we surface those
-  //    as separate, more actionable rows.
+  // 3. GEO citable gaps — RESERVED for the future Python-swarm (A10) block.
+  //    The current Node engine doesn't populate `report.geo.citable_gaps`, so
+  //    this loop is a no-op today. When the swarm lands and produces a
+  //    structured citable_gaps array, those rows surface here with the
+  //    `Citable gap: …` title prefix — distinct from the `GEO: …` prefix the
+  //    flat-finding branch above uses, so the two streams won't collide in
+  //    the dedup pass.
   const geo = report.geo;
   if (geo?.citable_gaps?.length) {
     for (const gap of geo.citable_gaps) {
@@ -161,9 +215,10 @@ function summarizeCounts(counts: Record<string, number> = {}): string {
 }
 
 // Issues from the Node engine carry a category (on-page / technical / schema /
-// geo / social). Everything geo-flavoured surfaces under the GEO agent in the
-// feed; everything else under SEO. Keeps the feed grouping aligned with the
-// agent grid on the landing page.
+// geo / social). Originally a "geo" category routed under the GEO agent here;
+// since the GEO branch in proposalsFromAudit now intercepts that case before
+// this helper is called, the "geo" arm is defensive-only — kept in case a
+// future caller imports classifyAgent directly.
 function classifyAgent(category?: string): string {
   if (category === "geo") return "geo";
   return "seo";

@@ -64,25 +64,38 @@ export async function POST(req: Request) {
       inserted = (data ?? []) as Proposal[];
     }
 
+    // GEO-only counts. The audit produces BOTH SEO and GEO rows from one
+    // engine call, but the GEO drilldown's Run button should reflect only
+    // what shows up in the GEO feed — otherwise the "N findings · M new"
+    // header lies about how productive the run was for this agent.
+    const geoInserted = inserted.filter((p) => p.agent_key === "geo");
+    const geoTotal = allProps.filter((p) => p.agent_key === "geo").length;
+    // Dedup count for GEO is whatever GEO-shaped rows the engine produced
+    // but didn't insert. Clamped at zero in case future code paths shift the
+    // arithmetic.
+    const geoDuped = Math.max(0, geoTotal - geoInserted.length);
+
     if (runId) {
-      // Count only the geo-attributed rows for this run's proposals_created.
-      const geoCount = inserted.filter((p) => p.agent_key === "geo").length;
       await sb
         .from("agent_runs")
         .update({
           status: "done",
           finished_at: new Date().toISOString(),
-          proposals_created: geoCount,
+          proposals_created: geoInserted.length,
         })
         .eq("id", runId);
     }
 
     return NextResponse.json({
       runId,
-      proposals: inserted,
-      proposals_total: allProps.length,
-      proposals_new: inserted.length,
-      proposals_deduped: dupedCount,
+      proposals: geoInserted,
+      proposals_total: geoTotal,
+      proposals_new: geoInserted.length,
+      proposals_deduped: geoDuped,
+      // Echo dupedCount (audit-wide) so any caller that wants the cross-agent
+      // total can still read it. Existing consumers (AgentRunButton) read
+      // the per-agent fields above.
+      proposals_deduped_total: dupedCount,
     });
   } catch (err) {
     const msg =

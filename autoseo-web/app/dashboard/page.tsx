@@ -35,6 +35,14 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// Module-level flag so the placeholder-doc audit (`logPlaceholdersOnce`) runs
+// at most once per server boot. The check exists to give the operator
+// visibility right after the starter-docs fix lands — old companies still
+// carry "(Set GROQ_API_KEY...)" bodies until the user clicks Regenerate on
+// each doc. Logging once is enough; no mass auto-regeneration (that would
+// risk burning Groq quota for companies the user may have already abandoned).
+let placeholdersAuditedThisBoot = false;
+
 // Agents we explicitly want on the dashboard's live row. Listed in display
 // order. Any other live agents in the catalog still get shown — they're
 // appended to this row after the named four.
@@ -71,6 +79,9 @@ const PAGESPEED_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 async function loadDashboard(companyId?: string): Promise<DashboardData | null> {
   if (!hasSupabaseEnv()) return null;
   const sb = supabaseServer();
+  // Fire-and-forget audit. Doesn't await — the dashboard load shouldn't
+  // pay for it, and the result is just a console line for the operator.
+  void logPlaceholdersOnce();
 
   const companyQuery = companyId
     ? sb.from("companies").select("*").eq("id", companyId).maybeSingle()
@@ -153,6 +164,44 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
     lastRunByAgent,
     pagespeed,
   };
+}
+
+// One-shot scan for placeholder document bodies left over from before the
+// starter-docs fix. We log a single line so the operator knows how many
+// companies will see "Regenerate with AI" buttons. NO mass regeneration —
+// that's the user's call (each regen costs an LLM call).
+async function logPlaceholdersOnce(): Promise<void> {
+  if (placeholdersAuditedThisBoot) return;
+  placeholdersAuditedThisBoot = true;
+  try {
+    const sb = supabaseServer();
+    // Count rows where either the regeneration_pending meta is set or the
+    // body matches the legacy placeholder shape ("(Set GROQ_API_KEY ...)").
+    // PostgREST OR query — `meta->>regeneration_pending` is text after the
+    // `->>` operator, hence the "true" string comparison.
+    const { count, error } = await sb
+      .from("documents")
+      .select("id", { count: "exact", head: true })
+      .or(
+        `meta->>regeneration_pending.eq.true,body.ilike.%GROQ_API_KEY%`,
+      );
+    if (error) {
+      console.warn("[startup] placeholder-doc audit failed:", error.message);
+      return;
+    }
+    const n = count ?? 0;
+    if (n > 0) {
+      console.log(
+        `[startup] ${n} placeholder documents detected — they'll regenerate ` +
+          `when you click Regenerate on the document page.`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      "[startup] placeholder-doc audit threw:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 // Match the normalisation lib/engines/pagespeed.ts uses so the cache key

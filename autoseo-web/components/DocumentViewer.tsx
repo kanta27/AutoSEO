@@ -24,8 +24,13 @@ const MAX_BODY_CHARS = 50_000;
 
 export function DocumentViewer({
   initialDoc,
+  showRegenerate = false,
 }: {
   initialDoc: CompanyDocument;
+  // True when the server detected this doc as either onboarding-pending
+  // (meta.regeneration_pending) or a legacy placeholder body. The button
+  // hides itself locally as soon as a regenerate succeeds.
+  showRegenerate?: boolean;
 }) {
   const [doc, setDoc] = useState<CompanyDocument>(initialDoc);
   const [mode, setMode] = useState<"view" | "edit">("view");
@@ -33,6 +38,8 @@ export function DocumentViewer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenAvailable, setRegenAvailable] = useState(showRegenerate);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
 
@@ -56,6 +63,36 @@ export function DocumentViewer({
     setDraftBody(doc.body);
     setError(null);
     setMode("view");
+  }
+
+  async function regenerate() {
+    if (regenerating) return;
+    setRegenerating(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/regenerate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        document?: CompanyDocument;
+        error?: string;
+      };
+      if (!res.ok || !j.ok || !j.document) {
+        setError(j.error || `Regeneration failed (${res.status})`);
+        return;
+      }
+      setDoc(j.document);
+      setDraftBody(j.document.body);
+      setRegenAvailable(false);
+      setToast("Regenerated.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Network error.");
+    } finally {
+      setRegenerating(false);
+    }
   }
 
   async function save() {
@@ -149,6 +186,28 @@ export function DocumentViewer({
           </div>
         )}
       </div>
+
+      {/* Regenerate banner — shows in view mode when the parent flagged this
+          doc as placeholder (either the new regeneration_pending meta or the
+          legacy "(Set GROQ_API_KEY ...)" body shape). It auto-hides once a
+          regenerate succeeds. */}
+      {mode === "view" && regenAvailable ? (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-line bg-card-2 px-4 py-3">
+          <p className="text-[12px] leading-[1.5] text-ink-2">
+            This document hasn&apos;t been generated yet. Click{" "}
+            <strong>Regenerate with AI</strong> to fill it from the company
+            context.
+          </p>
+          <button
+            type="button"
+            onClick={regenerate}
+            disabled={regenerating}
+            className="btn btn-primary text-[13px]"
+          >
+            {regenerating ? "Generating…" : "Regenerate with AI"}
+          </button>
+        </div>
+      ) : null}
 
       {mode === "view" ? (
         <article className="rounded-md border border-line bg-card-2 p-5">

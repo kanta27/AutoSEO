@@ -534,14 +534,55 @@ or split the doc if you genuinely need more.
 Same secrecy posture as `/api/proposals/:id` — service-role server-side, no
 public auth on the routes themselves yet.
 
+### Starter-doc generation + Regenerate
+
+Onboarding generates each starter doc with its OWN prompt, in parallel via
+`Promise.allSettled`. The five prompts live in
+[`lib/onboarding/starter-docs.ts`](lib/onboarding/starter-docs.ts) and are
+shared with the per-document Regenerate button.
+
+A previous bundled-JSON approach silently failed when Llama truncated the
+response: `brand_voice` and `product_info` came back as `""`, the two
+remaining bundled fields fell back to a `(Set GROQ_API_KEY ...)`
+placeholder string, and `llms_txt` got the deterministic fallback. The new
+flow runs five separate plain-markdown calls — no JSON parsing fragility,
+and per-kind failures are scoped to that one kind.
+
+When a per-kind call genuinely fails (rate limit, transient 5xx, model
+returns <80 chars), onboarding writes a short placeholder body and stamps
+`meta.regeneration_pending: true`. The document viewer detects that flag
+(plus a regex catch for the legacy `(Set GROQ_API_KEY ...)` bodies on
+companies onboarded before this fix landed) and renders a **Regenerate
+with AI** button:
+
+```
+POST /api/documents/:id/regenerate   →   re-runs the per-kind prompt,
+                                          writes body, clears the flag,
+                                          returns the updated row.
+```
+
+The dashboard's data loader fires a one-shot count of placeholder docs on
+the first load per server boot and logs a single line:
+
+```
+[startup] 12 placeholder documents detected — they'll regenerate when you
+click Regenerate on the document page.
+```
+
+No mass auto-regeneration — each call is one Groq request, and the user
+may not care about every old company. The button is the gate.
+
 ### Out of scope this session
 
 - Version history / undo.
 - Multi-user edit collisions (we're single-user).
 - A "Reset to starter content" ⋯-menu action (would just re-run the
-  onboarding LLM step for that single kind — easy to wire later).
+  per-kind prompt; the API already supports it via Regenerate, but the
+  ⋯ menu UI is deferred).
 - Creating documents from scratch (only the five onboarding-seeded kinds
   exist for now).
+- "Save and regenerate" combined action.
+- Per-section regeneration (keep one section, refresh the rest).
 
 ---
 

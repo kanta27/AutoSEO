@@ -12,6 +12,10 @@ import Link from "next/link";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
 import type { Company, CompanyDocument, DocumentKind } from "@/lib/supabase/types";
 import { DocumentViewer } from "@/components/DocumentViewer";
+import {
+  STARTER_DOC_KINDS,
+  isPlaceholderBody,
+} from "@/lib/onboarding/starter-docs";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +102,18 @@ export default async function DocumentPage({
   const label = KIND_LABEL[doc.kind] ?? doc.title;
   const consumedBy = KIND_CONSUMED_BY[doc.kind] ?? "";
 
+  // The Regenerate button shows when EITHER:
+  //   • onboarding stamped meta.regeneration_pending=true on this row, OR
+  //   • the body matches the heuristic for legacy / current placeholders
+  //     (rows created before this fix landed are caught by the body test).
+  // Disable the button for any kind whose prompt we don't have — only the
+  // starter kinds qualify.
+  const meta = (doc.meta ?? {}) as { regeneration_pending?: boolean };
+  const canRegenerate = STARTER_DOC_KINDS.includes(doc.kind);
+  const showRegenerate =
+    canRegenerate &&
+    (Boolean(meta.regeneration_pending) || isPlaceholderBody(doc.body));
+
   return (
     <main className="min-h-screen px-4 py-6 md:px-6">
       <header className="mx-auto mb-6 flex max-w-[900px] items-center justify-between gap-4">
@@ -123,7 +139,7 @@ export default async function DocumentPage({
             </div>
           </div>
           <div className="p-5">
-            <DocumentViewer initialDoc={doc} />
+            <DocumentViewer initialDoc={doc} showRegenerate={showRegenerate} />
             {consumedBy ? (
               <p className="mt-5 border-t border-line pt-4 text-[12px] leading-[1.5] text-ink-3">
                 {consumedBy}

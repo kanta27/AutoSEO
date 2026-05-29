@@ -24,7 +24,11 @@ import { llm, hasLlmKey, LLM_MODEL } from "@/lib/llm";
 import { runNodeAudit, EngineUnavailableError } from "@/lib/engines/node-audit";
 import { proposalsFromAudit } from "@/lib/proposals";
 import { detectPlatform } from "@/lib/connectors/detect";
-import type { Competitor } from "@/lib/supabase/types";
+import type { Competitor, DocumentKind } from "@/lib/supabase/types";
+import {
+  generateAllStarterDocs,
+  STARTER_DOC_TITLES,
+} from "@/lib/onboarding/starter-docs";
 
 export const runtime = "nodejs";
 // Onboarding fans out to several LLM + network calls; bump above the 60s
@@ -32,34 +36,28 @@ export const runtime = "nodejs";
 // validations).
 export const maxDuration = 120;
 
+// Classify only handles the small structured fields now. The two markdown
+// bodies it used to return (brand_voice_md, product_info_md) silently failed
+// when the LLM truncated the bundled JSON — see lib/onboarding/starter-docs.ts
+// for the per-kind replacements that own those bodies now.
 type ClassifyResult = {
   name: string;
   description: string;
   category: string;
   team_size: string;
-  brand_voice_md: string;
-  product_info_md: string;
-};
-
-type StarterDocsResult = {
-  competitor_analysis_md: string;
-  marketing_strategy_md: string;
-  llms_txt: string;
 };
 
 const CLASSIFY_SYSTEM = `You analyze a company's homepage and return a JSON object
-that captures who they are, in their own voice, for use as marketing context.
+that captures who they are at a glance, for downstream marketing tools.
 
 Return strictly:
 {
   "name": "short brand/company name",
   "description": "one sentence (<= 24 words) describing what they do",
   "category": "industry/category, lowercase, hyphenated if needed",
-  "team_size": "best guess: solo | small (2-10) | mid (11-50) | large (51+) | unknown",
-  "brand_voice_md": "markdown notes on tone, voice principles, words to use, words to avoid",
-  "product_info_md": "markdown summary of products/services, audience, primary use cases"
+  "team_size": "best guess: solo | small (2-10) | mid (11-50) | large (51+) | unknown"
 }
-Never invent facts. If you cannot tell, write "unknown" or leave the markdown short.`;
+Never invent facts. If you cannot tell, write "unknown".`;
 
 const COMPETITORS_SYSTEM = `You are identifying DIRECT competitors for a company.
 
@@ -103,39 +101,6 @@ Counter-example (DO NOT return these for a meal-kit service):
 - Grubhub / DoorDash / Uber Eats — restaurant DELIVERY, not meal kits.
 - Instacart — grocery delivery, not meal kits.
 - Walmart / Whole Foods — grocery retail, different shape entirely.`;
-
-const STARTER_DOCS_SYSTEM = `You write three starter marketing documents for a company.
-Return strictly JSON:
-{
-  "competitor_analysis_md": "...",
-  "marketing_strategy_md": "...",
-  "llms_txt": "..."
-}
-
-competitor_analysis_md: a short markdown bulleted summary of the supplied competitors
-(one line per competitor: bold name then a one-line positioning + a note on what differentiates
-the input company from them). 5-8 bullets max.
-
-marketing_strategy_md: a markdown numbered list of 3-5 starter strategic ideas for this
-company given its category and competitor landscape. Concrete, not generic.
-
-llms_txt: a starter llms.txt file following the format at https://llmstxt.org.
-Specifically:
-  # {Company Name}
-  > One-sentence description.
-
-  ## About
-  - 2-3 bullet points on the company.
-
-  ## Products & Services
-  - 2-3 bullet points on what they offer.
-
-  ## Audience
-  - 1-2 bullet points on who they serve.
-Pure markdown. No code fences.
-
-Never invent specific facts you weren't given (prices, customer names, exact dates).
-Be useful but conservative.`;
 
 // HEAD-validation cap and per-request timeout for competitor URLs.
 const COMPETITOR_HEAD_TIMEOUT_MS = 3_000;
@@ -204,20 +169,21 @@ export async function POST(req: Request) {
       })
     : [];
 
-  // 4. Bundle the three new starter docs into ONE LLM call so we don't pay
-  //    three round-trips. Fallback strings ensure the docs still get created
-  //    even if this step bombs.
-  let starter: StarterDocsResult = fallbackStarterDocs(classified.name, classified.description);
-  if (hasLlmKey()) {
-    try {
-      starter = await generateStarterDocs(classified, competitors);
-    } catch (err) {
-      console.warn(
-        "[onboard] starter docs failed:",
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
+  // 4. Generate all five starter documents IN PARALLEL — one prompt per kind,
+  //    plain markdown output (no JSON parsing to break), Promise.allSettled
+  //    so a single 429 / transient error never poisons the other four. Per-
+  //    kind failures get REGEN_PLACEHOLDER + meta.regeneration_pending=true
+  //    so the document viewer can offer a Regenerate button without re-
+  //    running the four successful kinds.
+  const starterDocs = hasLlmKey()
+    ? await generateAllStarterDocs({
+        name: classified.name,
+        url,
+        category: classified.category,
+        description: classified.description,
+        competitors,
+      })
+    : [];
 
   // 5. Detect the CMS platform — best-effort, never blocks onboarding. The
   // detector swallows all errors internally and returns 'unknown' on failure.
@@ -260,46 +226,28 @@ export async function POST(req: Request) {
   }
   const companyId = company.id as string;
 
-  // 7. Insert the 5 starter documents. Each gets `meta: { is_starter: true }`
-  //    so the Company panel can render a "New" badge until edit-doc lands.
-  const STARTER_META = { is_starter: true };
-  await sb.from("documents").insert([
-    {
-      company_id: companyId,
-      kind: "product_info",
-      title: "Product Information",
-      body: classified.product_info_md || "_(Set GROQ_API_KEY to auto-generate.)_",
-      meta: STARTER_META,
-    },
-    {
-      company_id: companyId,
-      kind: "brand_voice",
-      title: "Brand Voice",
-      body: classified.brand_voice_md || "_(Set GROQ_API_KEY to auto-generate.)_",
-      meta: STARTER_META,
-    },
-    {
-      company_id: companyId,
-      kind: "competitor_analysis",
-      title: "Competitor Analysis",
-      body: starter.competitor_analysis_md,
-      meta: STARTER_META,
-    },
-    {
-      company_id: companyId,
-      kind: "marketing_strategy",
-      title: "Marketing Strategy",
-      body: starter.marketing_strategy_md,
-      meta: STARTER_META,
-    },
-    {
-      company_id: companyId,
-      kind: "llms_txt",
-      title: "llms.txt",
-      body: starter.llms_txt,
-      meta: STARTER_META,
-    },
-  ]);
+  // 7. Insert the starter documents. Each carries `meta.is_starter: true`
+  //    (drives nothing now but signals "this came from onboarding" — useful
+  //    for telemetry and the future Reset-to-starter flow). Per-kind
+  //    failures additionally carry `meta.regeneration_pending: true` so the
+  //    document viewer offers Regenerate.
+  type StarterDocRow = {
+    company_id: string;
+    kind: DocumentKind;
+    title: string;
+    body: string;
+    meta: { is_starter: true; regeneration_pending?: boolean };
+  };
+  const rows: StarterDocRow[] = starterDocs.map((d) => ({
+    company_id: companyId,
+    kind: d.kind,
+    title: STARTER_DOC_TITLES[d.kind] ?? d.kind,
+    body: d.body,
+    meta: d.failed
+      ? { is_starter: true, regeneration_pending: true }
+      : { is_starter: true },
+  }));
+  await sb.from("documents").insert(rows);
 
   // 8. Seed the Actions Feed with the audit summary so the dashboard isn't empty.
   if (audit) {
@@ -347,19 +295,6 @@ function fallbackClassify(url: string, title?: string): ClassifyResult {
     description: title || `Company at ${host}`,
     category: "unknown",
     team_size: "unknown",
-    brand_voice_md: "_(Set GROQ_API_KEY to auto-generate brand voice notes from the homepage.)_",
-    product_info_md: "_(Set GROQ_API_KEY to auto-generate product info from the homepage.)_",
-  };
-}
-
-function fallbackStarterDocs(name: string, description: string): StarterDocsResult {
-  return {
-    competitor_analysis_md:
-      "_(Competitor analysis will populate once GROQ_API_KEY is set. Use the edit pencil on the Competitors grid to add competitors manually.)_",
-    marketing_strategy_md:
-      "_(Marketing strategy will populate once GROQ_API_KEY is set.)_",
-    llms_txt:
-      `# ${name}\n> ${description || "_(no description)_"}\n\n## About\n- _(generated on first audit)_\n`,
   };
 }
 
@@ -408,8 +343,6 @@ function parseClassifyJson(text: string): ClassifyResult | null {
       description: String(obj.description),
       category: String(obj.category ?? "unknown"),
       team_size: String(obj.team_size ?? "unknown"),
-      brand_voice_md: String(obj.brand_voice_md ?? ""),
-      product_info_md: String(obj.product_info_md ?? ""),
     };
   } catch {
     return null;
@@ -659,53 +592,3 @@ function safeHost(url: string): string {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Starter docs bundle — ONE LLM call returning all three markdown blocks.
-
-async function generateStarterDocs(
-  classified: ClassifyResult,
-  competitors: Competitor[],
-): Promise<StarterDocsResult> {
-  const client = llm();
-  const completion = await client.chat.completions.create({
-    model: LLM_MODEL,
-    max_tokens: 1800,
-    messages: [
-      { role: "system", content: STARTER_DOCS_SYSTEM },
-      {
-        role: "user",
-        content:
-          `Company: ${classified.name}\n` +
-          `Description: ${classified.description}\n` +
-          `Category: ${classified.category}\n` +
-          `Competitors: ${
-            competitors.length
-              ? competitors.map((c) => `${c.name} (${c.url})`).join(", ")
-              : "(none detected)"
-          }\n\n` +
-          `Return only the JSON object. Markdown bodies, no code fences.`,
-      },
-    ],
-  });
-
-  const text = completion.choices?.[0]?.message?.content ?? "";
-  const parsed = parseStarterDocsJson(text);
-  if (parsed) return parsed;
-  // LLM came back malformed — return fallbacks rather than blowing up.
-  return fallbackStarterDocs(classified.name, classified.description);
-}
-
-function parseStarterDocsJson(text: string): StarterDocsResult | null {
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    const obj = JSON.parse(m[0]) as Partial<StarterDocsResult>;
-    return {
-      competitor_analysis_md: String(obj.competitor_analysis_md ?? "").trim(),
-      marketing_strategy_md: String(obj.marketing_strategy_md ?? "").trim(),
-      llms_txt: String(obj.llms_txt ?? "").trim(),
-    };
-  } catch {
-    return null;
-  }
-}

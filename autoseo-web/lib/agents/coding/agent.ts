@@ -111,6 +111,16 @@ export async function runCodingAgent(
       }
     } catch (err) {
       // Per-handoff resilience: one bad handoff never crashes the others.
+      // Log the full error so devs can see which handoff blew up and why —
+      // publish_error only stores a 500-char summary.
+      console.error(
+        `[agent:coding-agent:dispatch] error caught (handoffId=${handoff.id}, type=${handoff.type}):`,
+        err,
+      );
+      if ((err as { cause?: unknown })?.cause) console.error("  cause:", (err as { cause: unknown }).cause);
+      if ((err as { response?: { data?: unknown } })?.response?.data) console.error("  response.data:", (err as { response: { data: unknown } }).response.data);
+      if ((err as { body?: unknown })?.body) console.error("  body:", (err as { body: unknown }).body);
+      if ((err as { stack?: unknown })?.stack) console.error("  stack:", (err as { stack: unknown }).stack);
       const msg = err instanceof Error ? err.message : String(err);
       await markHandoffFailed(sb, handoff.id, `Unexpected error: ${msg}`);
       result.skipped.push({ handoffId: handoff.id, reason: msg });

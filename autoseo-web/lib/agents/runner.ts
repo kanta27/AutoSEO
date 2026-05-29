@@ -64,6 +64,14 @@ export async function runAgent(input: AgentRunInput): Promise<AgentRunOutput> {
         tool_choice: oaTools.length ? "auto" : undefined,
       });
     } catch (err) {
+      // Loud terminal logging so the dev can see the real stack/cause/body.
+      // The publish_error column only stores a short string; this prints
+      // everything we know to the server console.
+      console.error("[agent:runner:llm-call] error caught:", err);
+      if ((err as { cause?: unknown })?.cause) console.error("  cause:", (err as { cause: unknown }).cause);
+      if ((err as { response?: { data?: unknown } })?.response?.data) console.error("  response.data:", (err as { response: { data: unknown } }).response.data);
+      if ((err as { body?: unknown })?.body) console.error("  body:", (err as { body: unknown }).body);
+      if ((err as { stack?: unknown })?.stack) console.error("  stack:", (err as { stack: unknown }).stack);
       const msg = err instanceof Error ? err.message : String(err);
       await logStep(input.runId, step, "error", { phase: "llm_call", error: msg });
       return { result: null, steps: step, budgetExhausted: false, failureReason: msg };
@@ -122,7 +130,11 @@ export async function runAgent(input: AgentRunInput): Promise<AgentRunOutput> {
       let args: Record<string, unknown>;
       try {
         args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-      } catch {
+      } catch (err) {
+        console.error("[agent:runner:tool-args-parse] error caught:", err);
+        console.error("  raw arguments string:", call.function.arguments);
+        if ((err as { cause?: unknown })?.cause) console.error("  cause:", (err as { cause: unknown }).cause);
+        if ((err as { stack?: unknown })?.stack) console.error("  stack:", (err as { stack: unknown }).stack);
         const result = {
           ok: false,
           data: { error: "Could not parse tool arguments as JSON." },
@@ -147,7 +159,13 @@ export async function runAgent(input: AgentRunInput): Promise<AgentRunOutput> {
       } catch (err) {
         // Tools shouldn't throw, but if they do we don't crash the run —
         // we hand the error back to the LLM as a normal tool result so it
-        // can either retry or move on.
+        // can either retry or move on. Log loudly so devs see WHICH tool
+        // and the full stack/cause.
+        console.error(`[agent:runner:tool-execute] error caught (tool=${tool.name}):`, err);
+        if ((err as { cause?: unknown })?.cause) console.error("  cause:", (err as { cause: unknown }).cause);
+        if ((err as { response?: { data?: unknown } })?.response?.data) console.error("  response.data:", (err as { response: { data: unknown } }).response.data);
+        if ((err as { body?: unknown })?.body) console.error("  body:", (err as { body: unknown }).body);
+        if ((err as { stack?: unknown })?.stack) console.error("  stack:", (err as { stack: unknown }).stack);
         const errMsg = err instanceof Error ? err.message : String(err);
         result = { ok: false, data: { error: errMsg } };
       }
@@ -200,7 +218,12 @@ async function logStep(
       role,
       content,
     });
-  } catch {
-    // Logging must NEVER take down the run. Swallow.
+  } catch (err) {
+    // Logging must NEVER take down the run. We swallow the throw so the loop
+    // keeps going, but print to the server console so the dev can see if
+    // agent_logs writes are silently failing (RLS, missing table, etc).
+    console.error("[agent:runner:log-step-write] error caught:", err);
+    if ((err as { cause?: unknown })?.cause) console.error("  cause:", (err as { cause: unknown }).cause);
+    if ((err as { stack?: unknown })?.stack) console.error("  stack:", (err as { stack: unknown }).stack);
   }
 }

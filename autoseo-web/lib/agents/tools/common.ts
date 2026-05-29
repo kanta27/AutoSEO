@@ -172,6 +172,11 @@ export const webSearchTool: AgentTool = {
         log_summary: `tavily q="${query.slice(0, 60)}" → ${results.length} result(s)`,
       };
     } catch (err) {
+      console.error("[agent:tool:web-search] error caught:", err);
+      if ((err as { cause?: unknown })?.cause) console.error("  cause:", (err as { cause: unknown }).cause);
+      if ((err as { response?: { data?: unknown } })?.response?.data) console.error("  response.data:", (err as { response: { data: unknown } }).response.data);
+      if ((err as { body?: unknown })?.body) console.error("  body:", (err as { body: unknown }).body);
+      if ((err as { stack?: unknown })?.stack) console.error("  stack:", (err as { stack: unknown }).stack);
       return {
         ok: false,
         data: {

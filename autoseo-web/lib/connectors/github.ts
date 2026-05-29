@@ -140,32 +140,23 @@ export async function openPullRequest(
   const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
   // 1) Base SHA — the commit the new branch will fork from.
-  let baseSha: string;
-  try {
-    const ref = await octokit.rest.git.getRef({
-      owner,
-      repo,
-      ref: `heads/${baseBranch}`,
-    });
-    baseSha = ref.data.object.sha;
-  } catch (err) {
-    throw rethrow(err, `Could not read base branch "${baseBranch}".`);
-  }
+  const ref = await ghCall("get base SHA", () =>
+    octokit.rest.git.getRef({ owner, repo, ref: `heads/${baseBranch}` }),
+  );
+  const baseSha = ref.data.object.sha;
 
   // 2) Create the feature branch off baseSha. If a branch with the same name
   //    already exists (e.g. user retried before we deleted it) the API
   //    returns 422 with "Reference already exists" — surface as an operation
   //    error so the caller picks a fresh name.
-  try {
-    await octokit.rest.git.createRef({
+  await ghCall("create branch", () =>
+    octokit.rest.git.createRef({
       owner,
       repo,
       ref: `refs/heads/${headBranch}`,
       sha: baseSha,
-    });
-  } catch (err) {
-    throw rethrow(err, `Could not create branch "${headBranch}".`);
-  }
+    }),
+  );
 
   // 3) Write every file to the new branch. For each path we PUT content; if
   //    the file already exists we must include its SHA so GitHub treats it
@@ -173,27 +164,30 @@ export async function openPullRequest(
   for (const file of input.files) {
     let existingSha: string | undefined;
     try {
-      const got = await octokit.rest.repos.getContent({
-        owner,
-        repo,
-        path: file.path,
-        ref: headBranch,
-      });
+      const got = await ghCall("check existing file", () =>
+        octokit.rest.repos.getContent({
+          owner,
+          repo,
+          path: file.path,
+          ref: headBranch,
+        }),
+      );
       // Type narrows: a file response is an object with `.sha`; directory
       // responses are arrays. We only handle the file case.
       if (!Array.isArray(got.data) && "sha" in got.data) {
         existingSha = got.data.sha;
       }
     } catch (err) {
-      // 404 → it's a new file; any other error is an actual failure.
-      const status = (err as { status?: number })?.status;
-      if (status !== 404) {
-        throw rethrow(err, `Could not check existing content for "${file.path}".`);
+      // 404 → it's a new file; any other error is an actual failure. The
+      // typed error from ghCall preserves the original `status` so we can
+      // distinguish here without losing the rich message on other codes.
+      if (!(err instanceof GitHubOperationError) || err.status !== 404) {
+        throw err;
       }
     }
 
-    try {
-      await octokit.rest.repos.createOrUpdateFileContents({
+    await ghCall("write file", () =>
+      octokit.rest.repos.createOrUpdateFileContents({
         owner,
         repo,
         path: file.path,
@@ -201,31 +195,27 @@ export async function openPullRequest(
         content: Buffer.from(file.content, "utf8").toString("base64"),
         branch: headBranch,
         sha: existingSha,
-      });
-    } catch (err) {
-      throw rethrow(err, `Could not write "${file.path}" on branch "${headBranch}".`);
-    }
+      }),
+    );
   }
 
   // 4) Open the PR. base ← protected branch, head ← our feature branch.
   //    We deliberately do not call `octokit.rest.pulls.merge` anywhere.
-  try {
-    const created = await octokit.rest.pulls.create({
+  const created = await ghCall("open PR", () =>
+    octokit.rest.pulls.create({
       owner,
       repo,
       title: input.prTitle,
       head: headBranch,
       base: baseBranch,
       body: taggedBody,
-    });
-    return {
-      url: created.data.html_url,
-      number: created.data.number,
-      branch: headBranch,
-    };
-  } catch (err) {
-    throw rethrow(err, `Could not open PR ${baseBranch} ← ${headBranch}.`);
-  }
+    }),
+  );
+  return {
+    url: created.data.html_url,
+    number: created.data.number,
+    branch: headBranch,
+  };
 }
 
 // Light-touch repo file finder. Used by the SEO-fix agent to locate the
@@ -272,16 +262,61 @@ export async function readRepoFile(
   }
 }
 
-// Pretty-print Octokit errors into our typed exception. We never throw the
-// raw Octokit error past this module — the approval handler catches our
-// types, nothing else.
-function rethrow(err: unknown, context: string): GitHubOperationError {
-  if (err instanceof GitHubOperationError) return err;
-  const e = err as { status?: number; message?: string; response?: { data?: { message?: string } } };
-  const status = e?.status;
-  const detail = e?.response?.data?.message || e?.message || String(err);
-  return new GitHubOperationError(
-    `${context} GitHub ${status ?? "?"}: ${String(detail).slice(0, 300)}`,
-    status,
-  );
+// ---------------------------------------------------------------------------
+// ghCall — single-purpose wrapper around any Octokit call. Success path is
+// transparent; the failure path captures:
+//   • the HTTP status (e.g. 404, 422)
+//   • the response body (Octokit puts it on err.response.data — object or
+//     string; we serialise objects defensively, cap at 500 chars)
+//   • the request URL (err.response.url, falling back to err.request.url)
+//   • a label identifying which step in openPullRequest blew up
+// All composed into one human-readable message stored on the typed
+// GitHubOperationError. The approval handler writes it verbatim into
+// proposals.publish_error so the UI shows it on the failed-row banner.
+async function ghCall<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    // Re-throw our own errors unchanged — they're already shaped.
+    if (err instanceof GitHubOperationError) throw err;
+    const e = err as {
+      status?: number;
+      message?: string;
+      response?: { data?: unknown; url?: string };
+      request?: { url?: string };
+    };
+    const status = typeof e?.status === "number" ? e.status : undefined;
+    const bodyStr = formatBody(e?.response?.data);
+    const path = e?.response?.url || e?.request?.url || "";
+    const parts = [`GitHub ${label} failed (${status ?? "unknown"}): ${bodyStr}`];
+    if (path) parts.push(`— ${scrubSecrets(path)}`);
+    throw new GitHubOperationError(scrubSecrets(parts.join(" ")), status);
+  }
+}
+
+// Render an Octokit response body into a short, useful string. GitHub
+// normally returns JSON ({message, documentation_url, errors}); occasionally
+// HTML or empty. We cap at 500 chars so a long validation-errors array
+// can't blow the publish_error column or the UI banner.
+function formatBody(body: unknown): string {
+  if (body == null) return "(no body)";
+  if (typeof body === "string") {
+    const trimmed = body.trim();
+    return trimmed ? trimmed.slice(0, 500) : "(empty body)";
+  }
+  try {
+    return JSON.stringify(body).slice(0, 500);
+  } catch {
+    return "(unserialisable body)";
+  }
+}
+
+// Defensive: redact anything that looks like an Authorization header value.
+// Octokit's error bodies don't normally contain the token, but errors can
+// occasionally include a request snapshot — better safe than sorry, since
+// this message ends up in publish_error and the UI.
+function scrubSecrets(s: string): string {
+  return s
+    .replace(/("?[Aa]uthorization"?\s*[:=]\s*"?)[^"\n,}]+/g, "$1[REDACTED]")
+    .replace(/(token\s+)[A-Za-z0-9_\-.]+/g, "$1[REDACTED]");
 }

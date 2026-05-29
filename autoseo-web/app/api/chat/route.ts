@@ -1,6 +1,6 @@
 // POST /api/chat  { companyId, messages: [{role, content}] }  → SSE stream of
-// `{ delta }` chunks, terminated by `[DONE]`. Server-side only; the Gemini
-// key never reaches the browser.
+// `{ delta }` chunks, terminated by `[DONE]`. Server-side only; the LLM
+// provider key never reaches the browser.
 
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
 import { llm, hasLlmKey, LLM_MODEL } from "@/lib/llm";
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     return jsonError(500, "Supabase not configured.");
   }
   if (!hasLlmKey()) {
-    return jsonError(500, "GEMINI_API_KEY missing — chat is disabled.");
+    return jsonError(500, "GROQ_API_KEY missing — chat is disabled.");
   }
 
   let body: ChatBody;
@@ -46,8 +46,8 @@ export async function POST(req: Request) {
   const ctx = await loadContext(body.companyId);
   if (!ctx) return jsonError(404, "Company not found.");
 
-  // OpenAI-compatible streaming through Gemini's compat endpoint. System
-  // prompt is the FIRST message (role:"system") — OpenAI/Gemini-compat don't
+  // OpenAI-compatible streaming through Groq's compat endpoint. System
+  // prompt is the FIRST message (role:"system") — OpenAI-compat APIs don't
   // have a separate top-level system param. Re-emit `choices[0].delta.content`
   // chunks as Server-Sent Events so the existing ChatPanel keeps working
   // unchanged.

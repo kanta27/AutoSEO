@@ -42,7 +42,9 @@ export function GraphsPanel({ proposals }: { proposals: Proposal[] }) {
 
         <ScoreCard score={score} grade={grade} />
         <CategoryBreakdown byCategory={byCategory} />
-        <TrafficPlaceholder />
+        {/* Connect Google Analytics → deferred. The previous traffic-trend
+            placeholder lived here; PageSpeed lab data now occupies its own
+            full-width row below this strip in dashboard/page.tsx. */}
       </div>
     </section>
   );
@@ -97,15 +99,3 @@ function CategoryBreakdown({
   );
 }
 
-// Honest placeholder for the traffic trend. No fake chart — the Connect-GA
-// wiring is a named follow-up and shouldn't be implied to exist already.
-function TrafficPlaceholder() {
-  return (
-    <div className="rounded-md border border-line bg-card-2 p-3">
-      <div className="t-eyebrow mb-2">Traffic trend</div>
-      <p className="text-[12px] leading-[1.5] text-ink-3">
-        Connect Google Analytics to populate (deferred).
-      </p>
-    </div>
-  );
-}

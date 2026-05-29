@@ -29,7 +29,7 @@ export type ToolResult = {
 export type AgentTool = {
   name: string;
   description: string;
-  // JSON-Schema — passed straight through to OpenAI/Gemini's `tools.function.parameters`.
+  // JSON-Schema — passed straight through to the OpenAI-compat `tools.function.parameters` field.
   parameters: Record<string, unknown>;
   // Set to true if calling this tool should end the agent loop (the runner
   // returns the call's result as the agent's output). Used for terminal
@@ -38,7 +38,7 @@ export type AgentTool = {
   execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult>;
 };
 
-// Convenience: turn an AgentTool[] into the OpenAI/Gemini `tools` parameter.
+// Convenience: turn an AgentTool[] into the OpenAI-compat `tools` parameter.
 export function toOpenAITools(tools: AgentTool[]): OpenAI.Chat.ChatCompletionTool[] {
   return tools.map((t) => ({
     type: "function",

@@ -1,12 +1,14 @@
 // Dashboard — agent-centric layout per the user's sketch.
 //
-// Top strip:    Company  |  Graphs  |  Competitors    (3 equal columns)
+// Top strip:    Company (now hosts competitors)  |  Graphs   (2 columns)
+// PageSpeed:    Full-width PageSpeedPanel (Mobile + Desktop + CWV)
 // Live row:     SEO   |  GEO   |  Blog   |  Coding    (4 cards)
 // Bottom row:   LinkedIn / X (coming-soon, 2 cards)   |   AI CMO chat (compact)
 //
+// Session 2 (rich Company panel) moved competitors INTO CompanyPanel, so the
+// top strip went from three columns to two; Graphs gets the freed width.
 // All actions remain human-gated — every agent card drills into the existing
 // ActionsFeed with the same Approve/Reject/Open-PR/Copy-markdown handlers.
-// No automation added in this session.
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { supabaseServer, hasSupabaseEnv } from "@/lib/supabase/server";
@@ -20,10 +22,16 @@ import type {
 } from "@/lib/supabase/types";
 import { CompanyPanel } from "@/components/CompanyPanel";
 import { GraphsPanel } from "@/components/GraphsPanel";
-import { CompetitorsPanel } from "@/components/CompetitorsPanel";
+// Standalone CompetitorsPanel retired in Session 2 — competitors now live
+// inside CompanyPanel. The file is left in the tree for one release in case
+// any other route imports it.
 import { DashboardAgentCard } from "@/components/DashboardAgentCard";
 import { ChatPanel } from "@/components/ChatPanel";
 import { RunAllButton } from "@/components/RunAllButton";
+import {
+  PageSpeedPanel,
+  type PageSpeedClientResult,
+} from "@/components/PageSpeedPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +55,18 @@ type DashboardData = {
   agents: Agent[];
   // Per-agent last successful run timestamp. Indexed by agent_key.
   lastRunByAgent: Record<string, string | null>;
+  // PageSpeed cache snapshot for the company URL. NULL when no row exists
+  // OR when the row is older than the cache TTL (6h) — in both cases the
+  // PageSpeedPanel triggers a fresh fetch on mount. We deliberately never
+  // call PSI from SSR: the call is 15-30s and would block the dashboard.
+  pagespeed: PageSpeedClientResult | null;
 };
+
+// Six hours, same TTL as lib/engines/pagespeed.ts. Duplicated to keep this
+// file decoupled from the engine module (which is "server-only" — fine here,
+// but we'd rather not import server-only into the data-loader path more
+// than necessary).
+const PAGESPEED_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 async function loadDashboard(companyId?: string): Promise<DashboardData | null> {
   if (!hasSupabaseEnv()) return null;
@@ -66,7 +85,9 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
   if (!company) return null;
   const co = company as Company;
 
-  const [docsRes, propsRes, agentsRes, runsRes] = await Promise.all([
+  const normalizedCompanyUrl = normalizePsiUrl(co.url);
+
+  const [docsRes, propsRes, agentsRes, runsRes, psRes] = await Promise.all([
     sb
       .from("documents")
       .select("*")
@@ -92,6 +113,13 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
       .eq("status", "done")
       .order("finished_at", { ascending: false })
       .limit(100),
+    // PSI cache row, by exact URL match. If the row is missing or stale, we
+    // pass null and the client component does the slow fetch on mount.
+    sb
+      .from("pagespeed_cache")
+      .select("result, fetched_at")
+      .eq("url", normalizedCompanyUrl)
+      .maybeSingle(),
   ]);
 
   // In-memory group-by — cheaper than N count queries and runs once per
@@ -102,13 +130,42 @@ async function loadDashboard(companyId?: string): Promise<DashboardData | null> 
     if (!lastRunByAgent[r.agent_key]) lastRunByAgent[r.agent_key] = r.finished_at;
   }
 
+  // PSI cache priming. We only pass `initialResult` when the cached row is
+  // still fresh — otherwise the client kicks off /api/pagespeed itself and
+  // shows the loading spinner. The PSI engine's own write path is the source
+  // of truth for the row shape; we just trust it here.
+  const psRow = psRes.data as
+    | { result: PageSpeedClientResult; fetched_at: string }
+    | null;
+  let pagespeed: PageSpeedClientResult | null = null;
+  if (psRow?.result && psRow.fetched_at) {
+    const age = Date.now() - new Date(psRow.fetched_at).getTime();
+    if (age < PAGESPEED_CACHE_TTL_MS) {
+      pagespeed = { ...psRow.result, fromCache: true };
+    }
+  }
+
   return {
     company: co,
     documents: (docsRes.data ?? []) as CompanyDocument[],
     proposals: (propsRes.data ?? []) as Proposal[],
     agents: (agentsRes.data ?? []) as Agent[],
     lastRunByAgent,
+    pagespeed,
   };
+}
+
+// Match the normalisation lib/engines/pagespeed.ts uses so the cache key
+// lookup is exact. (The engine prefixes https, strips trailing slash; we
+// can't import its server-only normaliser from this loader without dragging
+// the whole module in, so we duplicate the small bit of logic.)
+function normalizePsiUrl(url: string): string {
+  try {
+    const u = new URL(url.startsWith("http") ? url : `https://${url}`);
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return url;
+  }
 }
 
 export default async function DashboardPage({
@@ -184,12 +241,20 @@ export default async function DashboardPage({
       </header>
 
       <div className="mx-auto max-w-[1500px] space-y-4">
-        {/* Top context strip — 3 equal columns at md+, stacks on mobile. */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {/* Top context strip — 2 columns at md+, stacks on mobile.
+            Company panel hosts the competitor grid now (Session 2). */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <CompanyPanel company={data.company} documents={data.documents} />
           <GraphsPanel proposals={data.proposals} />
-          <CompetitorsPanel company={data.company} documents={data.documents} />
         </div>
+
+        {/* PageSpeed lab data — two stacked panels (scores + CWV). Server
+            pre-fills `initialResult` only when the cache is ≤6h old; the
+            client fires a fresh PSI call otherwise. */}
+        <PageSpeedPanel
+          url={data.company.url}
+          initialResult={data.pagespeed}
+        />
 
         {/* Live agent row — 1 / 2 / 4 cards by viewport. */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

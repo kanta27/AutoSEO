@@ -1,7 +1,7 @@
 "use client";
 
 // Right panel — AI CMO chat. Posts to /api/chat which streams the model's
-// reply over SSE (Gemini via the OpenAI-compatible endpoint). Server route
+// reply over SSE (Groq via the OpenAI-compatible endpoint). Server route
 // loads the company + pending proposals as context, so the model can answer
 // questions about "what should I do next" with grounding.
 
@@ -17,9 +17,9 @@ export function ChatPanel({
 }: {
   companyId: string;
   companyName: string;
-  // e.g. "gemini-2.5-flash · gemini" — passed from the server component so we
-  // don't import server-only modules here, and so the label updates on every
-  // provider/model swap without code changes.
+  // e.g. "llama-3.3-70b-versatile · groq" — passed from the server component
+  // so we don't import server-only modules here, and so the label updates on
+  // every provider/model swap without code changes.
   modelLabel: string;
   // Dashboard puts the chat in the bottom-right slot at a smaller footprint
   // (fixed-height card next to coming-soon agents). Default keeps the old

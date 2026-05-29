@@ -3,6 +3,17 @@
 
 export type CompanyPlatform = "shopify" | "wordpress" | "unknown";
 
+// Single competitor row stored inside `companies.competitors` (jsonb).
+// `source` distinguishes auto-detected (onboarding LLM + HEAD validation)
+// from manually-added (the edit modal in the Company panel).
+export type CompetitorSource = "detected" | "manual";
+export type Competitor = {
+  name: string;
+  url: string;
+  logo_url?: string;
+  source: CompetitorSource;
+};
+
 export type Company = {
   id: string;
   url: string;
@@ -12,13 +23,20 @@ export type Company = {
   created_at: string;
   platform: CompanyPlatform;             // added by migration 0004
   platform_meta: Record<string, unknown>; // added by migration 0004
+  // ---- migration 0009 ----
+  // Auto-classified at onboarding (e.g. "Meal Kit Service"). Promoted from
+  // profile->>'category'; the migration backfills existing rows.
+  category: string | null;
+  // Detected + manual competitors. Always an array (default '[]'::jsonb).
+  competitors: Competitor[];
 };
 
 export type DocumentKind =
   | "product_info"
   | "brand_voice"
   | "competitor_analysis"
-  | "marketing_strategy";
+  | "marketing_strategy"
+  | "llms_txt"; // added by migration 0009
 
 export type CompanyDocument = {
   id: string;
@@ -27,6 +45,12 @@ export type CompanyDocument = {
   title: string;
   body: string;
   created_at: string;
+  // ---- migration 0009 ----
+  // Free-form metadata. Onboarding stamps { is_starter: true } on seeded
+  // docs so the Company panel can render a "New" badge until the user
+  // edits the doc (when edit lands; v1 just shows the badge unconditionally
+  // while is_starter remains true).
+  meta: Record<string, unknown>;
 };
 
 export type Agent = {

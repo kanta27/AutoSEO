@@ -4,14 +4,19 @@
 // for this company, written in its brand voice, structured for search ranking.
 //
 // Loop shape (the LLM drives this via tool calls; the system prompt below
-// explains the contract):
-//   1. get_company_context  — identity + brand voice
-//   2. get_keyword_gaps     — what should this article target?
-//   3. web_search           — facts/freshness for the chosen topic (optional)
-//   4. draft mentally       — no tool; just the LLM thinking
-//   5. seo_self_check       — verify the deterministic checklist
-//   6. (if failed) revise once
-//   7. submit_article       — terminal; returns the deliverable
+// explains the contract). The order is signal-gathering FIRST, then topic
+// selection, then drafting — so the chosen topic reflects current world
+// context (news, competitor moves, trends) rather than just on-site signal.
+//   1. get_company_context              — identity + brand voice
+//   2. get_keyword_gaps                 — what should this article target?
+//   3. get_news_for_topic               — recent news hooks (Tavily; optional)
+//   4. get_competitor_signals           — what competitors just published
+//   5. get_trending_topics_for_industry — broader category trend
+//   6. (now pick the topic, weighing all of the above)
+//   7. web_search                       — supporting facts for the chosen topic (optional)
+//   8. seo_self_check                   — verify the deterministic checklist
+//   9. (if failed) revise once
+//  10. submit_article                   — terminal; returns the deliverable
 import "server-only";
 
 import { runAgent } from "../runner";
@@ -21,6 +26,11 @@ import {
   getKeywordGapsTool,
   webSearchTool,
 } from "../tools/common";
+import {
+  getNewsForTopicTool,
+  getCompetitorSignalsTool,
+  getTrendingTopicsForIndustryTool,
+} from "./signal-tools";
 import {
   seoSelfCheckTool,
   createSubmitArticleTool,
@@ -39,15 +49,24 @@ Your job: draft ONE publish-ready article that helps this company rank for a
 real keyword/topic gap.
 
 Work in this order:
-1. Call get_company_context to learn the brand voice, product, and tone.
-2. Call get_keyword_gaps. If gaps are returned, pick the single best one
-   based on: how concretely you can write about it given the company's
-   product/audience, and traffic potential. If none are returned, propose
-   a strong keyword/topic from the company's description and product info.
-3. (Optional) Call web_search up to twice for current facts/stats to make
+1. Call get_company_context for identity + brand voice.
+2. Call get_keyword_gaps for SEO-derived topics.
+3. Call get_news_for_topic with the company's category or product as the query, to find recent
+   newsworthy hooks. (If available=false, skip.)
+4. Call get_competitor_signals to see what competitors have published lately — to either avoid
+   duplication or to go DEEPER on a topic they covered shallowly. (If available=false, skip.)
+5. Call get_trending_topics_for_industry for broader signal. (If available=false, skip.)
+6. NOW pick the single best topic, weighing:
+   - SEO opportunity (keyword gap with real volume)
+   - Timeliness (a news hook makes the article feel fresh)
+   - Differentiation (don't write what a competitor already published this week — go deeper or
+     pick a different angle)
+   - Fit with the company's product/audience (must be concretely writable)
+   Be explicit in your reasoning about WHY you picked it (visible in your next tool call).
+7. (Optional) Call web_search up to twice for current facts/stats to make
    the article citable. If web_search returns { available: false }, skip
    research and write from context — do not call it again.
-4. Draft the article in the brand voice. Structure for SEO:
+   Then draft the article in the brand voice. Structure for SEO:
    - Title: 30–65 chars, includes the target keyword, compelling not clickbait.
    - Meta description: 140–160 chars, includes keyword, has a soft CTA.
    - Body markdown: starts with "# {H1 Title}" that includes the keyword.
@@ -57,10 +76,10 @@ Work in this order:
    - Internal links: 2–4 suggested anchor → target_path pairs to other pages
      on the company's site that would be relevant. Use plausible paths
      (e.g. "/blog/related-topic"); the human will verify them at review.
-5. Call seo_self_check with the full draft. If passed=false, REVISE the draft
+8. Call seo_self_check with the full draft. If passed=false, REVISE the draft
    to fix every listed issue, then call seo_self_check ONCE more. If it still
    fails, submit anyway — the human will adjust.
-6. Call submit_article with the final draft.
+9. Call submit_article with the final draft.
 
 Hard rules:
 - Never invent product features, prices, customer names, or statistics. If
@@ -102,11 +121,14 @@ export async function runBlogAgent(
     tools: [
       getCompanyContextTool,
       getKeywordGapsTool,
+      getNewsForTopicTool,
+      getCompetitorSignalsTool,
+      getTrendingTopicsForIndustryTool,
       webSearchTool,
       seoSelfCheckTool,
       submitTool,
     ],
-    maxSteps: 6,
+    maxSteps: 10,
   });
 
   if (result.failureReason) {

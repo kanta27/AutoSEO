@@ -17,7 +17,7 @@ app calls:
 
 - Landing page (`/`) with the URL onboarding form + agent grid.
 - `POST /api/onboard` — audits the URL via the Node engine, asks the LLM
-  (Gemini via its OpenAI-compatible endpoint) to infer name/description/
+  (Groq via its OpenAI-compatible endpoint) to infer name/description/
   brand-voice/product-info, creates the company + documents, seeds the
   Actions Feed with the audit summary, redirects to the dashboard.
 - Dashboard (`/dashboard`) — 4-panel layout pulling live from Supabase.
@@ -25,7 +25,7 @@ app calls:
   into a `proposals` row, records an `agent_runs` row.
 - `POST /api/proposals/:id` — Approve/Reject (status flip only; real publish
   actions land in a later session).
-- `POST /api/chat` — streamed LLM reply (SSE; Gemini via OpenAI-compatible
+- `POST /api/chat` — streamed LLM reply (SSE; Groq via OpenAI-compatible
   endpoint) grounded on the live company context (company + pending proposals
   + latest audit + documents).
 
@@ -58,16 +58,21 @@ Copy `.env.example` to `.env.local` and fill in:
 ```env
 SUPABASE_URL=https://YOUR-PROJECT.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi…                                       # service-role, server-only
-GEMINI_API_KEY=AIza…                                                         # get at https://aistudio.google.com/apikey
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/     # default; trailing slash required
-AUTOSEO_MODEL=gemini-2.5-flash                                               # see model note below
+GROQ_API_KEY=gsk_…                                                           # get at https://console.groq.com (free, no credit card)
+AUTOSEO_MODEL=llama-3.3-70b-versatile                                        # Groq's flagship; supports tool calling
 NODE_ENGINE_URL=http://localhost:3000                                        # autoseo-app default
 ```
 
-> **About the model:** `gemini-2.5-flash` has the [Google AI Studio free
-> tier](https://aistudio.google.com/apikey) — the default. `gemini-3.5-flash`
-> is the newer paid GA (released 2026-05-19, $1.50 in / $9.00 out per 1M
-> tokens). Flip `AUTOSEO_MODEL` in `.env.local` to switch; no code change.
+> **About the LLM:** We use [Groq](https://console.groq.com)'s OpenAI-compatible
+> endpoint (`https://api.groq.com/openai/v1`). The default model
+> `llama-3.3-70b-versatile` is the recommended production flagship and works
+> reliably with tool calling on the free tier. Flip `AUTOSEO_MODEL` in
+> `.env.local` to switch models; no code change.
+>
+> Previously this project ran on Google Gemini's OpenAI-compat layer, but
+> Gemini's free tier silently 400s on tool-calling requests — see the comment
+> at the top of [`lib/llm.ts`](lib/llm.ts) for the history. The wrapper there
+> is the single place to swap if a future migration is needed.
 
 ### 3. Run all three processes
 
@@ -108,7 +113,7 @@ autoseo-web (Next.js, this app)
   ├── app/api/proposals/[id]    decide() flips status
   ├── app/api/chat              streamed LLM reply over SSE
   ├── lib/supabase/server.ts    service-role client (server-only)
-  ├── lib/llm.ts                Gemini client (OpenAI SDK + compat URL, server-only)
+  ├── lib/llm.ts                Groq client (OpenAI SDK + compat URL, server-only)
   ├── lib/engines/node-audit.ts → POST autoseo-app/api/audit
   ├── lib/engines/python-swarm  STUB (future session)
   └── lib/proposals.ts          AuditReport → NewProposal[]
@@ -154,9 +159,11 @@ autoseo-app (Node Express, the SEO/GEO engine)
   shows the "not configured" message. No crash.
 - Node engine offline → onboarding still succeeds (with hostname-derived
   defaults), and a "Audit engine offline" card seeds the feed.
-- `GEMINI_API_KEY` missing → onboarding uses fallback name/description; chat
-  returns a 500 with a clear "GEMINI_API_KEY missing" error.
-- Wrong `AUTOSEO_MODEL` slug → Gemini returns a 4xx; the chat UI surfaces
+- `GROQ_API_KEY` missing → onboarding uses fallback name/description; chat
+  returns a 500 with a clear "GROQ_API_KEY missing" error. If only the legacy
+  `GEMINI_API_KEY` is set, `llm()` throws a migration-helper error pointing
+  at the rename rather than failing with a confusing 401 from Groq.
+- Wrong `AUTOSEO_MODEL` slug → Groq returns a 4xx; the chat UI surfaces
   the upstream error message. Update the env var, no restart needed for
   `npm run dev` (it picks up changes on next request).
 
@@ -245,17 +252,22 @@ your click.**
 ### Migration
 
 Run `supabase/migrations/0003_blog_agent.sql` once. It adds the `blog` row to
-the agent catalog (weekly cadence — `schedule_hours=168`), extends the
-proposal status enum to include `published` / `publish_failed`, adds
-`publish_url` + `publish_error` columns, and creates `agent_logs` (per-step
-agentic-loop trace, scoped to a single `agent_runs` row).
+the agent catalog, extends the proposal status enum to include `published` /
+`publish_failed`, adds `publish_url` + `publish_error` columns, and creates
+`agent_logs` (per-step agentic-loop trace, scoped to a single `agent_runs`
+row). Then run `supabase/migrations/0007_blog_daily_cadence.sql` to switch
+the Blog agent from weekly (168h) to daily (24h) — matches the world-aware
+update below.
 
 ### How the loop works
 
 The Blog agent uses the shared runner in `lib/agents/runner.ts` — a generic
-Gemini tool-calling loop that exposes a typed `tools/` registry to the LLM.
+OpenAI-compat tool-calling loop (currently pointed at Groq) that exposes a
+typed `tools/` registry to the LLM.
 For each tool call the runner logs a row to `agent_logs` so you can read back
-*why* the agent picked the topic it did. Step budget: 6.
+*why* the agent picked the topic it did. Step budget: 10 (the agent now does
+three extra outward-looking calls before drafting — see "Daily, world-aware"
+below).
 
 Tools the Blog agent gets:
 
@@ -263,9 +275,69 @@ Tools the Blog agent gets:
 |---|---|
 | `get_company_context` | Reads the company + brand_voice + product_info documents. |
 | `get_keyword_gaps` | Mines existing SEO/GEO audit proposals for topics worth writing about. Empty when no audit data exists — the agent then brainstorms from the company context. |
-| `web_search` | Optional Tavily-backed search. Returns `{ available: false }` when `TAVILY_API_KEY` is unset, and the agent proceeds without external research. |
+| `get_news_for_topic` | Tavily news-mode search (last 14 days) for a recent hook. `{ available: false }` when `TAVILY_API_KEY` is unset. |
+| `get_competitor_signals` | Polite read of each competitor's `sitemap.xml` / RSS / Atom feed (5-second timeout per host). Sources from `companies.competitors` (migration 0009) with a fallback to legacy `profile.competitors`. `{ available: false }` when no competitors are recorded. |
+| `get_trending_topics_for_industry` | Tavily search for "latest trends {category}" derived from `companies.category` (migration 0009) with a fallback to `profile.category` or the description. `{ available: false }` when neither is set or Tavily is off. |
+| `web_search` | Optional Tavily-backed general search. Returns `{ available: false }` when `TAVILY_API_KEY` is unset, and the agent proceeds without external research. |
 | `seo_self_check` | Deterministic checklist (keyword in title/H1/first 100 words, meta 140-160c, ≥3 H2s, 800-1500 words). |
 | `submit_article` | Terminal — calling it ends the loop and the runner shapes the deliverable into a `blog_post` proposal. |
+
+### Blog Agent — daily, world-aware
+
+As of migration `0007`, the Blog agent runs **daily** (`schedule_hours=24`)
+and gathers external signal BEFORE picking a topic — so two consecutive days'
+drafts cover genuinely different ground rather than rehashing the same
+on-site keyword gap.
+
+Order of operations on every run:
+
+1. `get_company_context` → identity + brand voice
+2. `get_keyword_gaps` → SEO-derived topic candidates
+3. `get_news_for_topic` → recent news hooks
+4. `get_competitor_signals` → what competitors just published
+5. `get_trending_topics_for_industry` → broader category trend
+6. **Pick** the topic — explicitly weighing SEO opportunity, timeliness,
+   differentiation from competitors, and writeability
+7. `web_search` (optional) → supporting facts, then draft
+8. `seo_self_check` → revise once if it fails
+9. `submit_article`
+
+**Competitor data.** Sourced from the dedicated `companies.competitors` jsonb
+column (added by migration 0009; the onboarding LLM step + the
+[edit pencil](#auto-detected-competitors) populate it). Legacy
+`profile.competitors` is still read as a fallback for pre-migration rows.
+Each entry can be `{name, url}`, `{name, domain}`, or a plain string.
+When the field is empty or missing, `get_competitor_signals` returns
+`{ available: false }` and the agent proceeds without it. No third-party scraping service — only
+polite reads of public `sitemap.xml`, `/rss.xml`, `/feed`, `/atom.xml` (and a
+few common variants), each with a 5-second timeout per host. All five
+competitors are fetched in parallel so the whole step is bounded to ~5 s
+wall clock.
+
+**Graceful degradation.** Each of the three new signal tools degrades to
+`{ available: false, reason }` on missing config / missing data / network
+failure — never throws. Run the agent with no `TAVILY_API_KEY` and no
+recorded competitors and it still completes a draft; the topic just won't
+have a news hook or a competitor angle.
+
+**Cost.** The new tools add 0–3 extra LLM steps per run (skipping any with
+`available: false`). Daily cadence × 1 article per company × ~10 steps fits
+comfortably in the Groq free tier.
+
+**Verifying after a run** (Supabase SQL editor):
+
+```sql
+-- The signal-gathering tool calls show up here:
+select step, content->>'name' as tool, created_at
+  from agent_logs
+ where run_id = '<run id from the Activity section>'
+   and role = 'tool_call'
+ order by step;
+```
+
+You should see `get_news_for_topic`, `get_competitor_signals`, and/or
+`get_trending_topics_for_industry` in the trace (any that returned
+`available: false` are still logged so you can see what was tried).
 
 ### Multi-platform publishing (Shopify + WordPress + manual)
 
@@ -395,6 +467,177 @@ Pick one:
 
 The current code is ready for any of these — the endpoint is the only
 contract. Picking + wiring one is a separate session.
+
+---
+
+## Auto-detected competitors
+
+The Company panel (top-left of the dashboard) hosts a 2-column grid of
+competitor logos. Onboarding populates this automatically; the user can
+curate the list with the pencil icon.
+
+### Migration
+
+Run `supabase/migrations/0009_company_competitors.sql` once. It adds:
+
+- `companies.competitors jsonb default '[]'` — the structured list.
+- `companies.category text` — promoted from `profile->>'category'` for
+  query simplicity. The migration backfills existing rows from the
+  profile JSON.
+- `documents.meta jsonb default '{}'` — onboarding stamps
+  `{ is_starter: true }` here so the Company panel can show a "New" pill
+  until the user edits the doc.
+- Expanded `documents.kind` CHECK to include `llms_txt`.
+
+Safe to re-run.
+
+### Onboarding detection flow
+
+After the existing classify step, onboarding runs two more LLM calls and
+one HEAD-validation pass:
+
+1. **Classify** (existing) — name, description, category, brand voice,
+   product info.
+2. **`detectCompetitors(name, url, category)`** — Groq returns a JSON list
+   of up to 5 well-known direct competitors `[{ name, url }, ...]`.
+3. **HEAD-validate** every candidate URL in parallel with
+   `Promise.allSettled` (3-second timeout each). Any candidate that returns
+   4xx/5xx or fails to connect is discarded. Surviving entries are stored
+   with `source: 'detected'`.
+4. **`generateStarterDocs`** — one bundled LLM call produces the markdown
+   for `competitor_analysis`, `marketing_strategy`, and `llms_txt` in a
+   single round-trip, given the company info + the validated competitors.
+5. **Seed five starter documents**, all flagged `meta.is_starter = true`:
+   `product_info`, `brand_voice`, `competitor_analysis`,
+   `marketing_strategy`, `llms_txt`.
+
+If any step fails (rate limit, network blip, LLM returns malformed JSON),
+onboarding still completes successfully — the relevant field is just
+populated with a graceful fallback. Onboarding success beats enrichment.
+
+**Latency.** Onboarding was ~10s before; with the two extra LLM calls + 5
+parallel HEAD probes it's typically ~15-25s now. The `maxDuration` on
+`/api/onboard` is bumped to 120s to cover the long tail.
+
+### Logos
+
+Logo URLs are computed at render time (never stored). The
+`<CompetitorLogo>` client component tries two free CDNs in order:
+
+1. **Clearbit logo CDN** — `https://logo.clearbit.com/{domain}` (real
+   brand logos for most well-known sites).
+2. **Google favicon service** — `https://www.google.com/s2/favicons?domain={domain}&sz=64`
+   (universal fallback).
+3. Final fallback: a deterministic monogram circle in our existing palette,
+   so the grid never shows a busted-image icon.
+
+The fall-through happens via `<img onError>`, so a missing logo never
+fires a layout shift after first paint.
+
+### Manual editing
+
+The pencil icon next to the COMPETITORS heading opens a small modal with
+a textarea (one URL per line). Submitting POSTs to
+`/api/companies/:id/competitors`:
+
+- Replaces only the rows whose `source === 'manual'` — detected
+  competitors stay untouched.
+- Validates each URL parses to http/https; the server fills in the name
+  from the hostname when the user only types a URL.
+- Dedupes against the detected list by hostname, so you can't accidentally
+  shadow a detected competitor.
+- Cap of 10 manual entries.
+
+### Starter documents
+
+The five starter docs are visible immediately in the Company panel with a
+"New" pill. The pill disappears once `meta.is_starter` is flipped to
+false — done by a future edit-document flow.
+
+```sql
+-- See which docs were seeded for a given company:
+select kind, title, length(body) as body_len, meta->>'is_starter' as starter
+  from documents
+ where company_id = '<id>'
+ order by created_at;
+```
+
+### Failure modes
+
+- `GROQ_API_KEY` unset → onboarding still creates the company; competitors
+  is `[]` and the starter docs contain a "Set GROQ_API_KEY to auto-generate"
+  marker instead of generated bodies.
+- Competitor LLM returns garbage / all URLs fail HEAD → empty `competitors`
+  array; the panel shows a "No competitors yet" empty state and the user
+  can add some with the edit pencil.
+- A competitor host blocks HEAD requests → that competitor is silently
+  dropped (no retry as GET in v1).
+
+### Out of scope this session
+
+- Document editing UI (clicking a doc row goes to a viewer in a future
+  session).
+- Per-competitor analysis drill-down.
+- Caching logo URLs (free CDNs handle it).
+- A real Articles content library (the folder is a placeholder).
+
+---
+
+## PageSpeed Insights panel
+
+A full-width row on the dashboard renders Google PageSpeed Insights (Lighthouse)
+data for the active company's URL: **Mobile + Desktop** category scores
+(Performance / Accessibility / Best Practices / SEO) plus the four lab Core
+Web Vitals (LCP, FCP, TBT, CLS) with a Mobile/Desktop tab toggle.
+
+### Migration
+
+Run `supabase/migrations/0008_pagespeed_cache.sql` once. It creates the
+`pagespeed_cache` table — a per-URL JSONB snapshot of the PSI result plus a
+`fetched_at` timestamp. Safe to re-run.
+
+### How it loads
+
+PSI calls take 15-30 seconds, so we never block server-side rendering on
+them. The dashboard's data loader **only reads** from `pagespeed_cache`:
+
+| Cached row state                | Initial render                                    |
+|---------------------------------|---------------------------------------------------|
+| Row is ≤6h old                  | Server passes it as `initialResult`, instant      |
+| Row missing or >6h old          | Server passes `null`; client fires PSI on mount   |
+
+The client component (`components/PageSpeedPanel.tsx`) calls
+`POST /api/pagespeed` which goes through `fetchPageSpeedCached`. That helper
+re-checks the cache, fetches fresh from Google PSI if needed, upserts, and
+returns. The **Refresh** button on the panel header sends
+`{ refresh: true }` which bypasses the cache.
+
+If a fresh fetch fails but a cached row exists, we still return the cached
+result with `stale: true` set — the panel renders the data with a small
+"cached" chip rather than collapsing into an error banner.
+
+### Env
+
+```env
+# Optional — without a key PSI is rate-limited (25k/day, 4 QPS)
+PAGESPEED_API_KEY=
+```
+
+### Failure modes
+
+- `PAGESPEED_API_KEY` unset → still works; just slower under load.
+- PSI returns 429 / 5xx → error state with a Retry button (the rest of the
+  dashboard is unaffected). If a cached row exists from a previous run, the
+  panel falls back to showing it with a "cached" chip.
+- Target URL unreachable from Google's side → PSI returns 5xx, surfaced
+  verbatim under the error chip.
+
+### Out of scope this session
+
+- Per-page PSI (only the company's root URL).
+- Scheduled PSI refresh via the cron scheduler (`schedule_hours` on agents).
+- CrUX (field data) — only lab data here.
+- Drilling into individual Lighthouse audits.
 
 ---
 
